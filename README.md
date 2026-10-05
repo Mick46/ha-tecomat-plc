@@ -101,3 +101,7 @@ uv venv --python 3.13 .venv && uv pip install -r requirements_test.txt
 ```
 
 Testy běží ve skutečném Home Assistant proti simulátoru PLC (`tests/mock_plc.py`), který napodobuje program `prgMain_milnik1c.ST`.
+
+## Licence
+
+[MIT](LICENSE). Integrace není oficiálním produktem Teco a.s. Tecomat® a Foxtrot® jsou ochranné známky Teco a.s.
