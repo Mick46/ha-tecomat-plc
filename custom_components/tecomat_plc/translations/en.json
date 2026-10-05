@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tecomat PLC",
+        "description": "Enter the PLC address (Modbus TCP). The integration reads the object description from the PLC and creates devices and entities.",
+        "data": {
+          "host": "PLC IP address",
+          "port": "Modbus TCP port",
+          "unit_id": "Modbus unit ID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the PLC.",
+      "no_descriptor": "The PLC responds but its program has no descriptor for this integration."
+    },
+    "abort": {
+      "already_configured": "This PLC is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tecomat PLC",
+        "description": "**[Open controller configuration]({panel_url})**: button to circuit mapping, temperature corrections and configuration versions.",
+        "menu_options": {
+          "connection": "PLC connection",
+          "display": "Display"
+        }
+      },
+      "connection": {
+        "title": "PLC connection",
+        "description": "Change the IP to move to another PLC (e.g. CP-1000 → CP-2000). Entities are kept if the new program uses the same object IDs.",
+        "data": {
+          "host": "PLC IP address",
+          "port": "Modbus TCP port",
+          "unit_id": "Modbus unit ID",
+          "scan_interval": "Scan interval (s)"
+        }
+      },
+      "display": {
+        "title": "Display",
+        "description": "Controller configuration is always available from this integration and from the PLC device page (Visit button). URL: {panel_url}",
+        "data": {
+          "show_in_sidebar": "Add controller configuration to the sidebar"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the PLC.",
+      "no_descriptor": "The PLC program has no descriptor for this integration."
+    }
+  }
+}

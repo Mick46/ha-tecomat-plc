@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tecomat PLC",
+        "description": "Zadejte adresu PLC (Modbus TCP). Integrace si z PLC načte popis objektů a podle něj vytvoří zařízení a entity.",
+        "data": {
+          "host": "IP adresa PLC",
+          "port": "Port Modbus TCP",
+          "unit_id": "Modbus unit ID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nelze se připojit k PLC (zkontrolujte IP, port a že je PLC zapnuté).",
+      "no_descriptor": "PLC odpovídá, ale nemá v programu popis pro tuto integraci (deskriptor)."
+    },
+    "abort": {
+      "already_configured": "Toto PLC už je přidané."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tecomat PLC",
+        "description": "**[Otevřít konfiguraci ovladačů]({panel_url})**: přiřazení tlačítek k okruhům, korekce teplot a verze konfigurace.",
+        "menu_options": {
+          "connection": "Připojení k PLC",
+          "display": "Zobrazení"
+        }
+      },
+      "connection": {
+        "title": "Připojení k PLC",
+        "description": "Změnou IP lze přejít na jiné PLC (např. CP-1000 → CP-2000). Entity zůstanou, pokud nový program používá stejná ID objektů.",
+        "data": {
+          "host": "IP adresa PLC",
+          "port": "Port Modbus TCP",
+          "unit_id": "Modbus unit ID",
+          "scan_interval": "Interval čtení (s)"
+        }
+      },
+      "display": {
+        "title": "Zobrazení",
+        "description": "Konfigurace ovladačů je vždy dostupná z této integrace a ze stránky zařízení PLC (tlačítko Navštívit). Adresa: {panel_url}",
+        "data": {
+          "show_in_sidebar": "Přidat konfiguraci ovladačů do bočního menu"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nelze se připojit k PLC.",
+      "no_descriptor": "PLC nemá v programu popis pro tuto integraci."
+    }
+  }
+}
