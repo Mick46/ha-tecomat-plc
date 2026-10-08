@@ -1,13 +1,23 @@
 {
   "domain": "tecomat_plc",
   "name": "Tecomat PLC",
-  "codeowners": ["@Mick46"],
+  "codeowners": [
+    "@Mick46"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "frontend", "panel_custom", "websocket_api"],
+  "dependencies": [
+    "http",
+    "frontend",
+    "panel_custom",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/Mick46/ha-tecomat-plc",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Mick46/ha-tecomat-plc/issues",
   "requirements": [],
-  "version": "0.2.0"
+  "version": "0.3.0",
+  "after_dependencies": [
+    "modbus"
+  ]
 }

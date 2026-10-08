@@ -26,7 +26,6 @@ from .const import (
     H_TST_BASE,
     H_WINDOW_BASE,
 )
-from .modbus_client import ModbusTcpClient
 
 
 class InvalidDescriptor(Exception):
@@ -105,14 +104,14 @@ def _decode(raw: bytes) -> str:
     return raw.decode("cp1250", errors="replace").strip()
 
 
-async def read_header(client: ModbusTcpClient) -> list[int]:
+async def read_header(client) -> list[int]:
     hdr = await client.read_holding(DESC_BASE, 32)
     if hdr[H_MAGIC] != DESC_MAGIC:
         raise InvalidDescriptor("V PLC chybí popis pro integraci (magic)")
     return hdr
 
 
-async def read_descriptor(client: ModbusTcpClient) -> Descriptor:
+async def read_descriptor(client) -> Descriptor:
     hdr = await read_header(client)
     n_groups = hdr[H_GROUPS]
     n_obj = hdr[H_OBJECTS]

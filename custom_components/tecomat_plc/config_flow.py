@@ -8,7 +8,8 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     CONF_SCAN_INTERVAL,
@@ -21,15 +22,13 @@ from .const import (
     PANEL_URL,
 )
 from .descriptor import Descriptor, InvalidDescriptor, read_descriptor
-from .modbus_client import ModbusError, ModbusTcpClient
+from .modbus_client import ModbusError
+from .transport import temporary_transport
 
 
-async def _probe(host: str, port: int, unit: int) -> Descriptor:
-    client = ModbusTcpClient(host, port, unit)
-    try:
+async def _probe(hass: HomeAssistant, host: str, port: int, unit: int) -> Descriptor:
+    async with temporary_transport(hass, host, port, unit) as client:
         return await read_descriptor(client)
-    finally:
-        await client.close()
 
 
 def _conn_schema(defaults: dict[str, Any], with_scan: bool) -> vol.Schema:
@@ -45,10 +44,12 @@ def _conn_schema(defaults: dict[str, Any], with_scan: bool) -> vol.Schema:
     return vol.Schema(fields)
 
 
-async def _validate(user_input: dict[str, Any]) -> tuple[Descriptor | None, dict[str, str]]:
+async def _validate(
+    hass: HomeAssistant, user_input: dict[str, Any]
+) -> tuple[Descriptor | None, dict[str, str]]:
     try:
-        desc = await _probe(user_input[CONF_HOST], user_input[CONF_PORT], user_input[CONF_UNIT_ID])
-    except ModbusError:
+        desc = await _probe(hass, user_input[CONF_HOST], user_input[CONF_PORT], user_input[CONF_UNIT_ID])
+    except (ModbusError, HomeAssistantError):
         return None, {"base": "cannot_connect"}
     except InvalidDescriptor:
         return None, {"base": "no_descriptor"}
@@ -61,7 +62,7 @@ class TecomatConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            desc, errors = await _validate(user_input)
+            desc, errors = await _validate(self.hass, user_input)
             if desc is not None:
                 await self.async_set_unique_id(f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}")
                 self._abort_if_unique_id_configured()
@@ -99,12 +100,9 @@ class TecomatOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         current = {**self.config_entry.data, **self.config_entry.options}
         if user_input is not None:
-            desc, errors = await _validate(user_input)
+            desc, errors = await _validate(self.hass, user_input)
             if desc is not None:
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    title=f"Tecomat {desc.plc_model} ({user_input[CONF_HOST]})",
-                )
+                # název integrace se přepíše po načtení nového PLC
                 return self.async_create_entry(data={**self.config_entry.options, **user_input})
         return self.async_show_form(
             step_id="connection",

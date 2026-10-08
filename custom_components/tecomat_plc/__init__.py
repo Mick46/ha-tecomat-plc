@@ -14,7 +14,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
@@ -32,13 +32,14 @@ from .const import (
 )
 from .coordinator import TecomatCoordinator
 from .descriptor import InvalidDescriptor, read_descriptor
-from .modbus_client import ModbusError, ModbusTcpClient
+from .modbus_client import ModbusError
+from .transport import async_create_transport
 from .versions import VersionStore
 from .websocket import async_register_websocket
 
 _LOGGER = logging.getLogger(__name__)
 
-PANEL_VERSION = "0.2.0"
+PANEL_VERSION = "0.3.0"
 
 TecomatConfigEntry = ConfigEntry[TecomatCoordinator]
 
@@ -95,11 +96,16 @@ async def _async_update_panel(hass: HomeAssistant, exclude: str | None = None) -
 
 async def async_setup_entry(hass: HomeAssistant, entry: TecomatConfigEntry) -> bool:
     conf = entry_settings(entry)
-    client = ModbusTcpClient(
-        conf[CONF_HOST],
-        conf.get(CONF_PORT, DEFAULT_PORT),
-        conf.get(CONF_UNIT_ID, DEFAULT_UNIT_ID),
-    )
+    try:
+        client = await async_create_transport(
+            hass,
+            entry,
+            conf[CONF_HOST],
+            conf.get(CONF_PORT, DEFAULT_PORT),
+            conf.get(CONF_UNIT_ID, DEFAULT_UNIT_ID),
+        )
+    except HomeAssistantError as err:
+        raise ConfigEntryNotReady(str(err)) from err
     try:
         desc = await read_descriptor(client)
     except (ModbusError, InvalidDescriptor) as err:
@@ -107,11 +113,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: TecomatConfigEntry) -> b
         raise ConfigEntryNotReady(str(err)) from err
 
     _LOGGER.info(
-        "Tecomat %s (program %s): %d skupin, %d objektů",
+        "Tecomat %s (program %s): %d skupin, %d objektů, spojení %s",
         desc.plc_model,
         desc.prog_version,
         len(desc.groups),
         len(desc.objects),
+        "sdílené (HA Modbus)" if client.shared else "vlastní",
     )
 
     coordinator = TecomatCoordinator(
@@ -123,7 +130,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: TecomatConfigEntry) -> b
     entry.runtime_data = coordinator
 
     # hlavní zařízení (PLC) musí existovat dřív, než na něj odkážou zařízení CIB
-    dr.async_get(hass).async_get_or_create(config_entry_id=entry.entry_id, **coordinator.device_info(0))
+    root = dr.async_get(hass).async_get_or_create(config_entry_id=entry.entry_id, **coordinator.device_info(0))
+    coordinator.root_device_id = root.id
+
+    # název podle skutečného PLC (např. po přechodu CP-1000 -> CP-2000)
+    title = f"Tecomat {desc.plc_model} ({conf[CONF_HOST]})"
+    if entry.title != title:
+        hass.config_entries.async_update_entry(entry, title=title)
 
     await _async_setup_frontend(hass)
     await _async_update_panel(hass)
@@ -134,7 +147,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TecomatConfigEntry) -> b
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: TecomatConfigEntry) -> None:
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Znovu načíst jen při změně nastavení (ne při změně názvu)."""
+    if dict(entry.options) != entry.runtime_data.options_snapshot:
+        await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: TecomatConfigEntry) -> bool:

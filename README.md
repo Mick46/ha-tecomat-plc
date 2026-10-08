@@ -28,7 +28,10 @@ Integrace pro PLC Tecomat Foxtrot (CP-1000, CP-2000, …) přes **Modbus TCP**.
 - **Heartbeat** HA → PLC každých 30 s. PLC pozná výpadek HA a přejde do záložního režimu.
 - **Změna programu v PLC** (vyšší verze v deskriptoru) se pozná automaticky a integrace se znovu načte.
 - **Přechod na jiné PLC** (např. CP-1000 → CP-2000): *Nastavit → Připojení k PLC*, změnit IP. Entity zůstanou, pokud nový program používá stejná `uid` objektů.
-- Jedno spojení Modbus TCP, čtení po blocích (CP-1000 povolí max. 2 Modbus klienty současně).
+- **Modbus spojení:**
+  - **HA 2026.10 a novější:** integrace používá **sdílené Modbus spojení Home Assistant** (`modbus.async_get_unit`). PLC je vidět v *Nastavení → Připojení → Modbus*. Pokud s PLC mluví i jiná integrace, sdílí stejné spojení.
+  - **Starší HA:** vlastní Modbus TCP klient.
+  - V obou případech jedno spojení k PLC a čtení po blocích (CP-1000 povolí max. 2 Modbus klienty současně).
 
 ## Instalace
 
@@ -101,6 +104,12 @@ uv venv --python 3.13 .venv && uv pip install -r requirements_test.txt
 ```
 
 Testy běží ve skutečném Home Assistant proti simulátoru PLC (`tests/mock_plc.py`), který napodobuje program `prgMain_milnik1c.ST`.
+
+HA 2026.10+ vyžaduje Python 3.14 a pro test sdíleného spojení i knihovny integrace Modbus:
+
+```bash
+uv venv --python 3.14 .venv314 && uv pip install -r requirements_test.txt "modbus-connection[tmodbus]" tmodbus pymodbus
+```
 
 ## Licence
 

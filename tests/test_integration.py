@@ -257,3 +257,44 @@ async def test_switch_plc_cp1000_to_cp2000(hass: HomeAssistant, plc: MockPlc) ->
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await cp2000.stop()
+
+
+async def test_shared_modbus_connection(hass: HomeAssistant, plc: MockPlc, hass_ws_client) -> None:
+    """HA 2026.10+: PLC jde přes sdílené spojení HA a je vidět v panelu Modbus."""
+    from custom_components.tecomat_plc import transport
+
+    if not transport.ha_has_shared_modbus():
+        pytest.skip("HA bez sdíleného Modbus API (starší než 2026.10)")
+    entry = await _setup(hass, plc)
+    assert entry.runtime_data.client.shared is True
+
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "modbus/connections/list"})
+    res = await ws.receive_json()
+    assert res["success"]
+    conns = [c for c in res["result"]["connections"] if c["source"] == "config_entry"]
+    assert len(conns) == 1
+    assert conns[0]["units"] == {entry.entry_id: [1]}
+    assert conns[0]["connected"] is True
+    assert str(plc.port) in [str(x) for x in conns[0]["endpoint"]]
+
+    # po odebrání integrace HA spojení zavře
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    await ws.send_json({"id": 2, "type": "modbus/connections/list"})
+    res = await ws.receive_json()
+    assert [c for c in res["result"]["connections"] if c["source"] == "config_entry"] == []
+
+
+async def test_own_client_fallback(hass: HomeAssistant, plc: MockPlc, monkeypatch) -> None:
+    """Starší HA: vlastní Modbus klient, vše funguje stejně."""
+    from custom_components.tecomat_plc import transport
+
+    monkeypatch.setattr(transport, "USE_SHARED", False)
+    entry = await _setup(hass, plc)
+    assert entry.runtime_data.client.shared is False
+    ent = er.async_get(hass)
+    light_id = ent.async_get_entity_id("light", DOMAIN, f"{entry.entry_id}_1")
+    await hass.services.async_call("light", "turn_on", {"entity_id": light_id}, blocking=True)
+    assert plc.reg[30002] == 1
+    assert await hass.config_entries.async_unload(entry.entry_id)

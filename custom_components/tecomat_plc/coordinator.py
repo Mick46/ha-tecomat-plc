@@ -36,9 +36,13 @@ from .const import (
     WINDOW_REGS,
 )
 from .descriptor import Descriptor, read_header
-from .modbus_client import ModbusError, ModbusTcpClient
+from .modbus_client import ModbusError
+from .transport import PlcTransport
 
 _LOGGER = logging.getLogger(__name__)
+
+# HA 2026.8+: propojení zařízení přes id v registru (via_device je zastaralé)
+VIA_DEVICE_ID = "via_device_id" in DeviceInfo.__annotations__
 
 HEARTBEAT_INTERVAL = timedelta(seconds=30)
 HEADER_CHECK_S = 60
@@ -87,7 +91,7 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        client: ModbusTcpClient,
+        client: PlcTransport,
         desc: Descriptor,
         scan_interval: float,
     ) -> None:
@@ -105,6 +109,8 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         self._unsub_hb = None
         self._last_hdr_check = 0.0
         self.versions = None  # VersionStore, nastaví __init__.py
+        self.root_device_id: str | None = None  # id zařízení PLC (skupina 0) v registru
+        self.options_snapshot: dict = dict(entry.options)
 
         sb = desc.status_base
         addrs: set[int] = set(range(sb, sb + STATUS_LEN))
@@ -199,7 +205,11 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
             info["sw_version"] = f"program {self.desc.prog_version}"
         else:
             info["model"] = "CIB"
-            info["via_device"] = (DOMAIN, f"{entry_id}_g0")
+            if VIA_DEVICE_ID:
+                if self.root_device_id:
+                    info["via_device_id"] = self.root_device_id
+            else:
+                info["via_device"] = (DOMAIN, f"{entry_id}_g0")
         return info
 
     # ----------------------------------------------------------- konfigurace
