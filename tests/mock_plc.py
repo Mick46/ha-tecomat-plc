@@ -50,6 +50,7 @@ class MockPlc:
         self.writes: list[tuple[int, list[int]]] = []
         self.server: asyncio.base_events.Server | None = None
         self._clients: set[asyncio.StreamWriter] = set()
+        self._dead: set[asyncio.StreamWriter] = set()  # spojení „před restartem“
         self.port = 0
         self._build(prog_version)
 
@@ -151,6 +152,10 @@ class MockPlc:
                 w.close()
             await self.server.wait_closed()
 
+    def restart(self) -> None:
+        """Restart PLC: stará TCP spojení zůstanou otevřená, ale PLC na ně neodpovídá."""
+        self._dead |= self._clients
+
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self._clients.add(writer)
         try:
@@ -158,6 +163,8 @@ class MockPlc:
                 head = await reader.readexactly(7)
                 tid, proto, length, unit = struct.unpack(">HHHB", head)
                 pdu = await reader.readexactly(length - 1)
+                if writer in self._dead:
+                    continue
                 resp = self._process(pdu)
                 writer.write(struct.pack(">HHHB", tid, 0, len(resp) + 1, unit) + resp)
                 await writer.drain()
@@ -165,6 +172,7 @@ class MockPlc:
             pass
         finally:
             self._clients.discard(writer)
+            self._dead.discard(writer)
             writer.close()
 
     def _process(self, pdu: bytes) -> bytes:

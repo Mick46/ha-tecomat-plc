@@ -61,8 +61,19 @@ class SharedTransport:
     async def _call(self, coro):
         try:
             return await coro
-        except (self._error_cls, OSError, TimeoutError) as err:
+        except TimeoutError as err:
+            # PLC po restartu neodpoví na starém TCP spojení. Knihovna ho sama
+            # nezahodí, takže ho zrušíme a příští dotaz se připojí znovu.
+            await self._recycle()
             raise ModbusError(f"{self.host}: {err}") from err
+        except (self._error_cls, OSError) as err:
+            raise ModbusError(f"{self.host}: {err}") from err
+
+    async def _recycle(self) -> None:
+        try:
+            await self._unit.disconnect()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Zrušení Modbus spojení k %s selhalo: %s", self.host, err)
 
     async def read_holding(self, address: int, count: int) -> list[int]:
         return list(await self._call(self._unit.read_holding_registers(address, count)))

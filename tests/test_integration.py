@@ -286,6 +286,30 @@ async def test_shared_modbus_connection(hass: HomeAssistant, plc: MockPlc, hass_
     assert [c for c in res["result"]["connections"] if c["source"] == "config_entry"] == []
 
 
+async def test_shared_connection_recovers_after_plc_restart(
+    hass: HomeAssistant, plc: MockPlc, monkeypatch
+) -> None:
+    """Po restartu PLC staré spojení neodpovídá: po timeoutu se zahodí a naváže nové."""
+    from custom_components.tecomat_plc import transport
+
+    if not transport.ha_has_shared_modbus():
+        pytest.skip("HA bez sdíleného Modbus API (starší než 2026.10)")
+    import modbus_connection._client as mc_client
+
+    monkeypatch.setattr(mc_client, "_DEFAULT_TIMEOUT", 0.5)
+    entry = await _setup(hass, plc)
+    coordinator = entry.runtime_data
+    assert coordinator.last_update_success
+
+    plc.restart()
+    await coordinator.async_refresh()
+    assert not coordinator.last_update_success  # timeout na starém spojení
+
+    await coordinator.async_refresh()
+    assert coordinator.last_update_success  # nové spojení
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_own_client_fallback(hass: HomeAssistant, plc: MockPlc, monkeypatch) -> None:
     """Starší HA: vlastní Modbus klient, vše funguje stejně."""
     from custom_components.tecomat_plc import transport
