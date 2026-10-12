@@ -17,6 +17,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CORR_INDEX_BASE,
     DOMAIN,
+    F_VALUE_32,
+    F_VALUE_UNSIGNED,
     H_MAGIC,
     H_PROG_VERSION,
     MAILBOX_BATCH,
@@ -32,6 +34,7 @@ from .const import (
     T_LIGHT,
     T_SWITCH,
     T_TEMP,
+    T_VALUE,
     WINDOW_BYTES,
     WINDOW_REGS,
 )
@@ -119,6 +122,10 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
                 addrs.add(o.addr)
             elif o.type == T_TEMP:
                 addrs.update((o.addr, o.addr + 1, o.addr + 2))
+            elif o.type == T_VALUE:
+                addrs.add(o.addr)
+                if o.flags & F_VALUE_32:
+                    addrs.add(o.addr + 1)
         self._ranges = build_ranges(addrs)
 
     # ------------------------------------------------------------------ data
@@ -154,6 +161,19 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
 
     def get_signed(self, addr: int) -> int | None:
         return signed16(self.get(addr))
+
+    def get_value(self, addr: int, flags: int) -> int | None:
+        """Celé číslo z 1 nebo 2 registrů (vyšší slovo první) podle příznaků objektu."""
+        hi = self.get(addr)
+        if hi is None:
+            return None
+        if flags & F_VALUE_32:
+            lo = self.get(addr + 1)
+            if lo is None:
+                return None
+            v = (hi << 16) | lo
+            return v if flags & F_VALUE_UNSIGNED or v < 0x80000000 else v - 0x100000000
+        return hi if flags & F_VALUE_UNSIGNED else signed16(hi)
 
     def status(self, offset: int) -> int | None:
         return self.get(self.desc.status_base + offset)

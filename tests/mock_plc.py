@@ -38,7 +38,10 @@ OBJECTS = [
 
 
 class MockPlc:
-    def __init__(self, swap_bytes: bool = True, prog_version: int = 3, plc_type: int = 1000) -> None:
+    def __init__(
+        self, swap_bytes: bool = True, prog_version: int = 3, plc_type: int = 1000, objects: list | None = None
+    ) -> None:
+        self.objects = OBJECTS if objects is None else objects
         self.plc_type = plc_type
         self.swap = swap_bytes  # True = bajty ve slově jako little-endian (nižší adresa = nižší bajt)
         self.reg: dict[int, int] = {}
@@ -69,7 +72,7 @@ class MockPlc:
 
     def _build(self, prog_version: int) -> None:
         hdr = [0] * 32
-        hdr[0:18] = [0x5443, 1, self.plc_type, prog_version, len(GROUPS), len(OBJECTS), MAX_B, 48,
+        hdr[0:18] = [0x5443, 1, self.plc_type, prog_version, len(GROUPS), len(self.objects), MAX_B, 48,
                      STATUS, MAILBOX, WINDOW, META, 8, STRS, 264, TST, 64, 32]
         for i, v in enumerate(hdr):
             self.reg[DESC + i] = v
@@ -78,7 +81,7 @@ class MockPlc:
         for g, (name, area) in enumerate(GROUPS):
             self._put_string(STRS, g, name)
             self._put_string(STRS, 32 + g, area)
-        for i, o in enumerate(OBJECTS):
+        for i, o in enumerate(self.objects):
             for k, v in enumerate(o[:8]):
                 self.reg[META + i * 8 + k] = v
             self._put_string(STRS, 64 + i, o[8])

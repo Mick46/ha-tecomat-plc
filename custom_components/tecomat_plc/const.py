@@ -52,6 +52,10 @@ T_SWITCH = 2
 T_BUTTON = 3
 T_TEMP = 4
 T_BINARY = 5
+T_VALUE = 6   # měřená hodnota: p1 desetinná místa, p2 jednotka, p3 třída; flags bit0 = 32 bit (addr = vyšší slovo), bit1 = bez znaménka
+
+F_VALUE_32 = 0x01
+F_VALUE_UNSIGNED = 0x02
 
 NO_MATRIX = 0xFFFF
 

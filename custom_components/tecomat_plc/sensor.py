@@ -1,13 +1,24 @@
-"""Teploty (typ TEMP) a diagnostika PLC."""
+"""Teploty (typ TEMP), měřené hodnoty (typ VALUE) a diagnostika PLC."""
 
 from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
-from homeassistant.const import EntityCategory, UnitOfTemperature
+from homeassistant.const import (
+    LIGHT_LUX,
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfEnergy,
+    UnitOfPower,
+    UnitOfTemperature,
+    UnitOfTime,
+    UnitOfVolume,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import S_CFG_CHECKSUM, S_HB_OUT, T_TEMP
+from .const import S_CFG_CHECKSUM, S_HB_OUT, T_TEMP, T_VALUE
 from .entity import TecomatEntity, TecomatStatusEntity
 
 
@@ -17,6 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
     for o in coord.desc.objects_of(T_TEMP):
         entities.append(TecomatTemp(coord, o, offset=1, suffix=""))
         entities.append(TecomatTemp(coord, o, offset=0, suffix="_raw"))
+    entities.extend(TecomatValue(coord, o) for o in coord.desc.objects_of(T_VALUE))
     entities.append(TecomatStatusSensor(coord, "heartbeat", "Heartbeat PLC", S_HB_OUT))
     entities.append(TecomatStatusSensor(coord, "checksum", "Kontrolní součet konfigurace", S_CFG_CHECKSUM))
     async_add_entities(entities)
@@ -41,6 +53,55 @@ class TecomatTemp(TecomatEntity, SensorEntity):
     def native_value(self) -> float | None:
         v = self.coordinator.get_signed(self.obj.addr + self._offset)
         return None if v is None else v / 10
+
+
+# kódy jednotek (p2) a tříd (p3) objektu VALUE – stejné čísluje generátor programu PLC
+UNITS = {
+    1: UnitOfPower.WATT,
+    2: UnitOfEnergy.KILO_WATT_HOUR,
+    3: PERCENTAGE,
+    4: UnitOfTemperature.CELSIUS,
+    5: UnitOfElectricPotential.VOLT,
+    6: UnitOfElectricCurrent.AMPERE,
+    7: LIGHT_LUX,
+    8: UnitOfVolume.CUBIC_METERS,
+    9: UnitOfTime.SECONDS,
+}
+CLASSES = {
+    1: SensorDeviceClass.POWER,
+    2: SensorDeviceClass.ENERGY,
+    3: SensorDeviceClass.BATTERY,
+    4: SensorDeviceClass.TEMPERATURE,
+    5: SensorDeviceClass.VOLTAGE,
+    6: SensorDeviceClass.CURRENT,
+    7: SensorDeviceClass.ILLUMINANCE,
+    8: SensorDeviceClass.GAS,
+    9: SensorDeviceClass.DURATION,
+}
+TOTALS = {SensorDeviceClass.ENERGY, SensorDeviceClass.GAS}
+
+
+class TecomatValue(TecomatEntity, SensorEntity):
+    """Obecná měřená hodnota: celé číslo z PLC dělené 10^p1."""
+
+    def __init__(self, coordinator, obj) -> None:
+        super().__init__(coordinator, obj)
+        self._div = 10 ** min(obj.p1, 6)
+        self._attr_native_unit_of_measurement = UNITS.get(obj.p2)
+        self._attr_device_class = CLASSES.get(obj.p3)
+        self._attr_suggested_display_precision = min(obj.p1, 6)
+        self._attr_state_class = (
+            SensorStateClass.TOTAL_INCREASING
+            if self._attr_device_class in TOTALS
+            else SensorStateClass.MEASUREMENT
+        )
+
+    @property
+    def native_value(self) -> float | int | None:
+        v = self.coordinator.get_value(self.obj.addr, self.obj.flags)
+        if v is None:
+            return None
+        return v / self._div if self._div > 1 else v
 
 
 class TecomatStatusSensor(TecomatStatusEntity, SensorEntity):

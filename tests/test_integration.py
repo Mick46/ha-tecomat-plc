@@ -322,3 +322,36 @@ async def test_own_client_fallback(hass: HomeAssistant, plc: MockPlc, monkeypatc
     await hass.services.async_call("light", "turn_on", {"entity_id": light_id}, blocking=True)
     assert plc.reg[30002] == 1
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_value_sensors(hass: HomeAssistant) -> None:
+    """Typ VALUE: 16 i 32 bit, znaménko, desetinná místa, jednotka a třída."""
+    from .mock_plc import OBJECTS
+
+    objs = OBJECTS + [
+        (6, 0, 30060, 0, 1, 1, 1, 310, "Výkon L1"),       # S32, W, power
+        (6, 0, 30062, 1, 2, 2, 3, 314, "Odběr"),          # U32, 0,1 kWh, energy
+        (6, 0, 30064, 2, 3, 3, 0, 43, "Baterie"),         # S16, 0,01 %, battery
+    ]
+    plc = MockPlc(objects=objs)
+    await plc.start()
+    try:
+        plc.reg[30060], plc.reg[30061] = 0xFFFF, 0xFC18   # -1000 W
+        plc.reg[30062], plc.reg[30063] = 0x0001, 0x0000   # 65536 -> 6553,6 kWh
+        plc.reg[30064] = 8750                             # 87,50 %
+        entry = await _setup(hass, plc)
+        ent = er.async_get(hass)
+
+        def state(uid: int):
+            eid = ent.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_{uid}")
+            return hass.states.get(eid)
+
+        p = state(310)
+        assert float(p.state) == -1000 and p.attributes["unit_of_measurement"] == "W"
+        assert p.attributes["device_class"] == "power" and p.attributes["state_class"] == "measurement"
+        e = state(314)
+        assert float(e.state) == 6553.6 and e.attributes["state_class"] == "total_increasing"
+        assert float(state(43).state) == 87.5
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    finally:
+        await plc.stop()

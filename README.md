@@ -74,6 +74,7 @@ Adresy jsou Modbus holding registry (v PLC Tecomat platí `%RW(2·N)` = adresa `
 | 3 | BUTTON | událost `čítač·256 + typ` (1 short, 2 long, 3 double) | sloupec matice (tlačítko) | |
 | 4 | TEMP | surová ×10 (INT), +1 korigovaná, +2 korekce | index korekce | |
 | 5 | BINARY | registr | číslo bitu | p2 = třída (0 –, 1 problem, 2 connectivity, 3 power, 4 door, 5 window, 6 motion, 7 opening); flags bit0 = invertovat |
+| 6 | VALUE | hodnota (32 bit: vyšší slovo na adrese, nižší na +1) | počet desetinných míst | p2 = jednotka (1 W, 2 kWh, 3 %, 4 °C, 5 V, 6 A, 7 lx, 8 m³, 9 s); p3 = třída (1 power, 2 energy, 3 battery, 4 temperature, 5 voltage, 6 current, 7 illuminance, 8 gas, 9 duration); flags bit0 = 32 bit, bit1 = bez znaménka. Energie a plyn mají `total_increasing`, ostatní `measurement`. |
 
 **Řetězce:** pole `STRING[n]` v kódování cp1250. Skupiny `0..31`, oblasti `32..63`, objekty `64..`. Délka položky a pořadí bajtů se zjistí z testovacích řetězců `'TECO','TECO'`.
 
