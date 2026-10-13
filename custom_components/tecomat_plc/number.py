@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CORR_INDEX_BASE, PARAM_INDEX_BASE, T_NUMBER, T_TEMP
+from .const import CORR_INDEX_BASE, F_PARAM_ENTITY, PARAM_INDEX_BASE, T_NUMBER, T_TEMP
 from .entity import TecomatEntity
 from .modbus_client import ModbusError
 from .sensor import UNITS
@@ -16,8 +16,11 @@ from .sensor import UNITS
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback) -> None:
     coord = entry.runtime_data
-    entities: list[NumberEntity] = [TecomatTempCorrection(coord, o) for o in coord.desc.objects_of(T_TEMP)]
-    entities += [TecomatParam(coord, o) for o in coord.desc.objects_of(T_NUMBER)]
+    entities: list[NumberEntity] = []
+    if coord.protocol < 2:
+        # protokol 2: korekce teplot a parametry se nastavují v panelu ovladačů
+        entities += [TecomatTempCorrection(coord, o) for o in coord.desc.objects_of(T_TEMP)]
+    entities += [TecomatParam(coord, o) for o in coord.desc.objects_of(T_NUMBER) if o.flags & F_PARAM_ENTITY]
     async_add_entities(entities)
 
 

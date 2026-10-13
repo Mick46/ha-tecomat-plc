@@ -58,6 +58,22 @@ T_VALUE = 6   # měřená hodnota: p1 desetinná místa, p2 jednotka, p3 třída
 T_DIMMER = 7  # stmívač: +0 žádaný jas 0–100 (zápis z HA), +1 skutečný jas
 T_NUMBER = 10 # parametr v PLC: +0 hodnota; p1 min, p2 max, p3 index (schránka 20000+p3); flags bity 0–2 desetinná místa, 8–15 jednotka
 
+F_PARAM_ENTITY = 0x10  # NUMBER: zobrazit jako entitu (jinak jen v panelu)
+
+# podtyp výstupu (protokol 2, meta p2 u LIGHT/SWITCH/DIMMER)
+SUBTYPES = {
+    1: "Světlo",
+    2: "Stmívač",
+    3: "Zásuvka",
+    4: "Čerpadlo",
+    5: "Ventilátor",
+    6: "Spínač",
+    7: "Kotel",
+    8: "TUV",
+    9: "Napájení hlavic",
+    10: "Topný okruh",
+}
+
 F_VALUE_32 = 0x01
 F_VALUE_UNSIGNED = 0x02
 

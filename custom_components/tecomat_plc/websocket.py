@@ -10,7 +10,10 @@ from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 
-from .const import DOMAIN, T_DIMMER, T_TEMP
+from .const import DOMAIN, SUBTYPES, T_DIMMER, T_NUMBER, T_TEMP
+from .sensor import UNITS
+
+UNIT_LABELS = {k: str(v) for k, v in UNITS.items()}
 from .modbus_client import ModbusError
 
 
@@ -81,8 +84,29 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
         if d.protocol >= 2
         else [],
         "targets": [
-            {"uid": o.uid, "name": o.name, "group": o.group, "dimmer": o.type == T_DIMMER}
+            {
+                "uid": o.uid,
+                "name": o.name,
+                "group": o.group,
+                "dimmer": o.type == T_DIMMER,
+                "sub": SUBTYPES.get(o.p2, "Světlo" if o.type != 2 else "Spínač"),
+            }
             for o in coord.targets_v2()
+        ]
+        if d.protocol >= 2
+        else [],
+        "params": [
+            {
+                "p": o.p3,
+                "uid": o.uid,
+                "name": o.name,
+                "group": o.group,
+                "min": o.p1 - 65536 if o.p1 > 32767 else o.p1,
+                "max": o.p2 - 65536 if o.p2 > 32767 else o.p2,
+                "dec": o.flags & 7,
+                "unit": UNIT_LABELS.get(o.flags >> 8, ""),
+            }
+            for o in d.objects_of(T_NUMBER)
         ]
         if d.protocol >= 2
         else [],

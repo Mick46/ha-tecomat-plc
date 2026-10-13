@@ -140,6 +140,7 @@ const STYLE = `
     border: 1px solid var(--divider-color); background: var(--secondary-background-color, transparent);
     color: var(--primary-text-color); font: inherit; font-size: 14px;
   }
+  td select.wide { width: 100%; }
   td select option, td select optgroup { color: var(--primary-text-color); background: var(--card-background-color); }
   input:focus { outline: 2px solid var(--primary-color); outline-offset: -1px; }
   .alert {
@@ -193,6 +194,7 @@ class TecomatPlcPanel extends HTMLElement {
     this._dialog = null;
     this._narrow = false;
     this._draft = null;
+    this._room = null;
   }
 
   set hass(h) {
@@ -240,7 +242,12 @@ class TecomatPlcPanel extends HTMLElement {
     try {
       this._info = await this._ws("info");
       const list = this._btnList();
-      if (this._sel === null || !list.find((b) => b.m === this._sel)) this._sel = list.length ? list[0].m : null;
+      if (this._v2()) {
+        const rooms = this._rooms();
+        if (this._room === null || !rooms.find((r) => r.id === this._room)) this._room = rooms.length ? rooms[0].id : null;
+        const inRoom = list.filter((b) => b.group === this._room);
+        if (this._sel === null || !inRoom.find((b) => b.m === this._sel)) this._sel = inRoom.length ? inRoom[0].m : null;
+      } else if (this._sel === null || !list.find((b) => b.m === this._sel)) this._sel = list.length ? list[0].m : null;
       this._draft = null;
       this._versions = await this._ws("versions/list");
       if (!this._base && this._versions.length) this._base = this._versions[0].id;
@@ -316,6 +323,151 @@ class TecomatPlcPanel extends HTMLElement {
       this._msg = "Akce tlačítka zapsány do PLC";
     });
   }
+  // místnosti (skupiny), které mají tlačítka, parametry nebo teploty
+  _rooms() {
+    const info = this._info;
+    const cnt = {};
+    const add = (g, k) => ((cnt[g] ||= { b: 0, p: 0, t: 0 })[k] += 1);
+    info.buttons2.forEach((x) => add(x.group, "b"));
+    (info.params || []).forEach((x) => add(x.group, "p"));
+    info.temps.forEach((x) => add(x.group, "t"));
+    return info.groups.filter((g) => cnt[g.id]).map((g) => ({ ...g, ...cnt[g.id] }));
+  }
+  _targetLabel(t, withRoom = true) {
+    return `${withRoom ? this._groupName(t.group) + " · " : ""}${t.sub} · ${t.name}`;
+  }
+  _paramValue(p) {
+    const v = Number((this._cfg && this._cfg.map[String(20000 + p.p)]) || 0);
+    return (v > 32767 ? v - 65536 : v) / 10 ** p.dec;
+  }
+  async _saveParam(p, input) {
+    let v = parseFloat(String(input).replace(",", "."));
+    if (isNaN(v)) return;
+    let raw = Math.round(v * 10 ** p.dec);
+    raw = Math.max(p.min, Math.min(p.max, raw));
+    await this._run("Zapisuji nastavení…", async () => {
+      await this._ws("config/set", { pairs: [[20000 + p.p, raw]] });
+      this._cfg = await this._ws("config/get");
+      this._msg = `${p.name}: zapsáno do PLC`;
+    });
+  }
+  _layoutV2(ready) {
+    const info = this._info;
+    const fmtT = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
+    const rooms = this._rooms();
+    const roomList = rooms
+      .map(
+        (r) => `
+        <div class="item ${r.id === this._room ? "sel" : ""}" data-room="${r.id}">
+          ${icon(r.id === 0 ? "mdi:server" : "mdi:sofa")}
+          <div class="text"><span class="name">${esc(r.name)}</span>
+            <span class="secondary">${[r.b && `${r.b} tl.`, r.p && `${r.p} nast.`, r.t && `${r.t} tepl.`].filter(Boolean).join(" · ")}</span></div>
+        </div>`
+      )
+      .join("");
+    const buttons = info.buttons2.filter((b) => b.group === this._room);
+    const btnItems = buttons
+      .map(
+        (b) => `
+        <div class="item ${b.b === this._sel ? "sel" : ""}" data-b="${b.b}">
+          ${icon("mdi:gesture-tap-button")}
+          <div class="text"><span class="name">${esc(b.name)}</span></div>
+        </div>`
+      )
+      .join("");
+    let left = `
+      <div class="card">
+        <div class="card-header">${icon("mdi:floor-plan")}Místnosti</div>
+        ${roomList || `<div class="empty">Nic k nastavení.</div>`}
+        <div style="height:8px"></div>
+      </div>`;
+    if (buttons.length)
+      left += `
+      <div class="card">
+        <div class="card-header">${icon("mdi:gesture-tap-button")}Tlačítka</div>
+        ${btnItems}
+        <div style="height:8px"></div>
+      </div>`;
+
+    const btn = buttons.find((b) => b.b === this._sel);
+    let right = `
+      <div class="card">
+        <div class="card-header">${icon("mdi:lightbulb-group")}
+          <div style="display:flex;flex-direction:column">${esc(this._groupName(this._room))}
+            <span class="sub">${btn ? esc(btn.name) : buttons.length ? "Vyberte tlačítko" : "Bez tlačítek"}</span>
+          </div>
+        </div>
+        ${this._alerts()}
+        ${btn && this._cfg ? this._renderActions({ ...btn, m: btn.b }, ready) : ""}
+        ${btn ? `<div class="note">Až 4 akce na krátký a 4 na dlouhý stisk. Víc akcí „Přepni“ na jednom stisku funguje jako skupina: když svítí aspoň jedno, vše zhasne, jinak se vše rozsvítí.</div>` : ""}
+      </div>`;
+
+    // nastavení místnosti: parametry a korekce teplot
+    const params = (info.params || []).filter((p) => p.group === this._room);
+    const temps = info.temps.filter((t) => t.group === this._room);
+    if (params.length || temps.length) {
+      const prow = params
+        .map(
+          (p) => `
+          <tr>
+            <td class="left">${esc(p.name)}</td>
+            <td><input id="par-${p.p}" type="number" step="${1 / 10 ** p.dec}" min="${p.min / 10 ** p.dec}" max="${p.max / 10 ** p.dec}"
+              value="${this._cfg ? this._paramValue(p) : ""}" ${ready ? "" : "disabled"}> ${esc(p.unit)}</td>
+            <td><button class="btn outlined" data-par="${p.p}" ${ready ? "" : "disabled"}>Uložit</button></td>
+          </tr>`
+        )
+        .join("");
+      const trow = temps
+        .map((t) => {
+          const tv = (this._cfg && this._cfg.temps[String(t.idx)]) || {};
+          const corr = this._cfg ? (this._cfg.corr[String(t.idx)] || 0) / 10 : 0;
+          return `
+          <tr>
+            <td class="left">${esc(t.name)} – korekce<span class="secondary">naměřeno ${fmtT(tv.raw)}, výsledek ${fmtT(tv.cor)}</span></td>
+            <td><input id="in-${t.idx}" type="number" step="0.1" min="-10" max="10" value="${corr.toFixed(1)}" ${ready ? "" : "disabled"}> °C</td>
+            <td><button class="btn outlined" data-corr="${t.idx}" ${ready ? "" : "disabled"}>Uložit</button></td>
+          </tr>`;
+        })
+        .join("");
+      right += `
+        <div class="card">
+          <div class="card-header">${icon("mdi:tune-variant")}Nastavení místnosti</div>
+          <div class="scroll"><table>${prow}${trow}</table></div>
+          <div class="note">Hodnoty jsou uložené v PLC a platí i bez Home Assistant.</div>
+        </div>`;
+    }
+    return [left, right];
+  }
+
+  _versionsCard(ready) {
+    const versions = this._versions.length
+      ? this._versions
+          .map(
+            (v) => `
+        <div class="ver ${this._base === v.id ? "cur" : ""}">
+          ${icon(v.source === "import" ? "mdi:file-import" : "mdi:history")}
+          <div class="text"><span>${esc(v.name)}</span>
+            <span class="secondary">${new Date(v.ts).toLocaleString("cs-CZ")}${v.source === "import" ? " · import" : ""}</span></div>
+          <button class="btn" data-restore="${v.id}" ${ready ? "" : "disabled"}>${icon("mdi:restore")}Obnovit</button>
+          <button class="iconbtn" style="color:var(--secondary-text-color)" data-del="${v.id}" title="Smazat" ${this._busy ? "disabled" : ""}>${icon("mdi:delete")}</button>
+        </div>`
+          )
+          .join("")
+      : `<div class="empty">Zatím žádná uložená verze.</div>`;
+    return `
+      <div class="card">
+        <div class="card-header">${icon("mdi:history")}Verze konfigurace</div>
+        ${versions}
+        <div class="note">Verze obsahují akce tlačítek, nastavení a korekce teplot. Ukládají se ručně z aktuálního obsahu PLC a jsou společné pro všechny uživatele (součást záloh Home Assistant).</div>
+        <div class="card-actions">
+          <button class="btn" id="importbtn" ${this._busy ? "disabled" : ""}>${icon("mdi:upload")}Import</button>
+          <button class="btn" id="export" ${ready ? "" : "disabled"}>${icon("mdi:download")}Export</button>
+          <button class="btn filled" id="savever" ${ready ? "" : "disabled"}>${icon("mdi:content-save")}Uložit verzi</button>
+          <input id="importfile" type="file" accept=".json,application/json" style="display:none">
+        </div>
+      </div>`;
+  }
+
   _renderActions(btn, ready) {
     const info = this._info;
     const acts = this._actions(btn.m);
@@ -327,7 +479,7 @@ class TecomatPlcPanel extends HTMLElement {
         .map(
           ([g, list]) =>
             `<optgroup label="${esc(this._groupName(Number(g)))}">${list
-              .map((t) => `<option value="${t.uid}" ${t.uid === sel ? "selected" : ""}>${esc(t.name)}</option>`)
+              .map((t) => `<option value="${t.uid}" ${t.uid === sel ? "selected" : ""}>${esc(this._targetLabel(t))}</option>`)
               .join("")}</optgroup>`
         )
         .join("");
@@ -339,7 +491,7 @@ class TecomatPlcPanel extends HTMLElement {
         .join("");
       const dis = ready ? "" : "disabled";
       return `<tr>
-        <td class="left"><select class="act" data-a="${a}" data-f="uid" ${dis}>${targetOpts(x.uid)}</select></td>
+        <td class="left" style="width:60%"><select class="act wide" data-a="${a}" data-f="uid" ${dis}>${targetOpts(x.uid)}</select></td>
         <td><select class="act" data-a="${a}" data-f="cmd" ${dis || (x.uid ? "" : "disabled")}>${cmdOpts}</select></td>
         <td>${x.uid && x.cmd >= 4 ? `<input class="actval" data-a="${a}" type="number" min="0" max="100" value="${x.val}" ${dis}>` : ""}</td>
       </tr>`;
@@ -540,7 +692,10 @@ class TecomatPlcPanel extends HTMLElement {
     let left = "";
     let right = `<div class="card"><div class="card-header">${icon("mdi:light-switch")}Načítám…</div>${this._alerts()}</div>`;
 
-    if (info) {
+    if (info && this._v2()) {
+      [left, right] = this._layoutV2(ready);
+    }
+    if (info && !this._v2()) {
       // tlačítka
       const byGroup = {};
       for (const b of this._btnList()) (byGroup[b.group] ||= []).push(b);
@@ -659,9 +814,10 @@ class TecomatPlcPanel extends HTMLElement {
             <input id="importfile" type="file" accept=".json,application/json" style="display:none">
           </div>
         </div>`;
-    } else if (this._error) {
+    } else if (!info && this._error) {
       right = `<div class="card"><div class="card-header">${icon("mdi:alert-circle")}Tecomat PLC</div>${this._alerts()}</div>`;
     }
+    if (info && this._v2()) right += this._versionsCard(ready);
 
     const dlg = this._dialog
       ? `<div class="backdrop" id="dlg-bg"><div class="dialog" role="dialog">
@@ -695,7 +851,14 @@ class TecomatPlcPanel extends HTMLElement {
       mb.narrow = this._narrow;
     }
     const on = (sel, fn) => root.querySelectorAll(sel).forEach((el) => el.addEventListener("click", () => fn(el)));
-    on(".item", (el) => {
+    on(".item[data-room]", (el) => {
+      this._room = Number(el.dataset.room);
+      const first = this._info.buttons2.find((b) => b.group === this._room);
+      this._sel = first ? first.b : null;
+      this._draft = null;
+      this._render();
+    });
+    on(".item[data-b]", (el) => {
       this._sel = Number(el.dataset.b);
       this._draft = null;
       this._render();
@@ -713,6 +876,10 @@ class TecomatPlcPanel extends HTMLElement {
     on("#actcancel", () => {
       this._draft = null;
       this._render();
+    });
+    on("button[data-par]", (el) => {
+      const p = this._info.params.find((x) => x.p === Number(el.dataset.par));
+      if (p) this._saveParam(p, root.getElementById(`par-${p.p}`).value);
     });
     on("button[data-corr]", (el) => {
       const idx = Number(el.dataset.corr);

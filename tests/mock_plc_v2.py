@@ -23,13 +23,13 @@ OBJ_OFS = 128
 GROUPS2 = [("CP-1000", "Admin"), ("Kuchyň", "Kuchyň"), ("Chodba", "Chodba")]
 # typ, skupina, adresa, p1, p2, p3, flags, uid, název
 OBJECTS2 = [
-    (1, 1, 30300, 0, 0, 0, 0, 20, "Bodovky"),
-    (7, 1, 30301, 0, 0, 0, 0, 2, "Pod linkou"),          # stmívač: +0 žádaný, +1 skutečný
+    (1, 1, 30300, 0, 1, 0, 0, 20, "Bodovky"),
+    (7, 1, 30301, 0, 2, 0, 0, 2, "Pod linkou"),          # stmívač: +0 žádaný, +1 skutečný
     (4, 1, 30303, 0, 0, 0, 0, 402, "Teplota"),           # teplota, korekce index 0
     (3, 1, 30306, 0, 0, 0, 0, 2091, "Vypínač Nahoře"),   # tlačítko b = 0
     (3, 2, 30307, 0, 0, 0, 0, 203, "Levé"),              # tlačítko b = 1
     (10, 1, 30308, 0, 1440, 0, 10 << 8, 30101, "Bodovky max. doba"),       # parametr 0, min
-    (10, 1, 30309, 0, 600, 1, 1 | (9 << 8), 30013, "Pod linkou náběh"),    # parametr 1, 0,1 s
+    (10, 1, 30309, 0, 600, 1, 1 | (9 << 8) | 0x10, 30013, "Pod linkou náběh"),    # parametr 1, 0,1 s, i jako entita
 ]
 
 

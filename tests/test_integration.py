@@ -402,6 +402,11 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         assert info["protocol"] == 2 and info["buttons"] == [] and info["circuits"] == []
         assert [b["uid"] for b in info["buttons2"]] == [2091, 203]
         assert {t["uid"]: t["dimmer"] for t in info["targets"]} == {20: False, 2: True}
+        assert {t["uid"]: t["sub"] for t in info["targets"]} == {20: "Světlo", 2: "Stmívač"}
+        assert [(p["p"], p["unit"], p["dec"]) for p in info["params"]] == [(0, "min", 0), (1, "s", 1)]
+        # parametr bez příznaku „entita“ je jen v panelu, korekce teplot v protokolu 2 také
+        assert ent.async_get_entity_id("number", DOMAIN, f"{entry.entry_id}_30101") is None
+        assert ent.async_get_entity_id("number", DOMAIN, f"{entry.entry_id}_402_corr") is None
 
         await ws.send_json({"id": 2, "type": f"{DOMAIN}/config/get", "entry_id": entry.entry_id})
         cfg = (await ws.receive_json())["result"]
