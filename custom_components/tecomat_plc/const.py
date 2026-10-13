@@ -13,7 +13,8 @@ DEFAULT_UNIT_ID = 1
 DEFAULT_SCAN_INTERVAL = 1.0
 
 # Deskriptor v PLC (pevná adresa, vše ostatní si integrace přečte z hlavičky)
-DESC_BASE = 24000
+DESC_BASE = 24000       # protokol 1
+DESC_BASES = (20000, 24000)  # kde hledat hlavičku: protokol 2, protokol 1
 DESC_MAGIC = 0x5443  # 'TC'
 DESC_PROTOCOL = 1
 
@@ -54,6 +55,9 @@ T_TEMP = 4
 T_BINARY = 5
 T_VALUE = 6   # měřená hodnota: p1 desetinná místa, p2 jednotka, p3 třída; flags bit0 = 32 bit (addr = vyšší slovo), bit1 = bez znaménka
 
+T_DIMMER = 7  # stmívač: +0 žádaný jas 0–100 (zápis z HA), +1 skutečný jas
+T_NUMBER = 10 # parametr v PLC: +0 hodnota; p1 min, p2 max, p3 index (schránka 20000+p3); flags bity 0–2 desetinná místa, 8–15 jednotka
+
 F_VALUE_32 = 0x01
 F_VALUE_UNSIGNED = 0x02
 
@@ -61,6 +65,8 @@ NO_MATRIX = 0xFFFF
 
 # Konfigurace (schránka)
 CORR_INDEX_BASE = 10000
+PARAM_INDEX_BASE = 20000
+BTN_SLOTS = 16  # protokol 2: registry konfigurace na tlačítko (8 akcí × 2)
 MAILBOX_BATCH = 32
 WINDOW_BYTES = 64
 WINDOW_REGS = 33

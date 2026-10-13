@@ -15,6 +15,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    BTN_SLOTS,
     CORR_INDEX_BASE,
     DOMAIN,
     F_VALUE_32,
@@ -23,6 +24,7 @@ from .const import (
     H_PROG_VERSION,
     MAILBOX_BATCH,
     NO_MATRIX,
+    PARAM_INDEX_BASE,
     PANEL_URL,
     S_CFG_ACK,
     S_CFG_CHECKSUM,
@@ -31,7 +33,9 @@ from .const import (
     STATUS_LEN,
     T_BINARY,
     T_BUTTON,
+    T_DIMMER,
     T_LIGHT,
+    T_NUMBER,
     T_SWITCH,
     T_TEMP,
     T_VALUE,
@@ -72,15 +76,22 @@ def build_ranges(addrs: set[int], max_gap: int = 16, max_len: int = 120) -> list
     return ranges
 
 
-def config_checksum(cfg_map: dict[str, int], corr: dict[int, int], max_b: int) -> int:
-    """Stejný výpočet jako v PLC."""
+def config_checksum(cfg_map: dict[str, int], corr: dict[int, int], max_b: int, protocol: int = 1) -> int:
+    """Stejný výpočet jako v PLC.
+
+    Protokol 1: klíč mapy „okruh,tlačítko“, index = okruh·max_b + tlačítko.
+    Protokol 2: klíč mapy = index ve schránce (tlačítka 0.., parametry 20000..).
+    """
     chk = 0
     for key, code in cfg_map.items():
         if not code:
             continue
-        c, b = (int(x) for x in key.split(","))
-        i = c * max_b + b
-        chk = (chk + code * ((i % 251) + 1)) % 65536
+        if protocol >= 2:
+            i = int(key)
+        else:
+            c, b = (int(x) for x in key.split(","))
+            i = c * max_b + b
+        chk = (chk + (int(code) & 0xFFFF) * ((i % 251) + 1)) % 65536
     for idx, val in corr.items():
         u = val + 65536 if val < 0 else val
         chk = (chk + u * (((CORR_INDEX_BASE + int(idx)) % 251) + 1)) % 65536
@@ -122,6 +133,10 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
                 addrs.add(o.addr)
             elif o.type == T_TEMP:
                 addrs.update((o.addr, o.addr + 1, o.addr + 2))
+            elif o.type == T_DIMMER:
+                addrs.update((o.addr, o.addr + 1))
+            elif o.type == T_NUMBER:
+                addrs.add(o.addr)
             elif o.type == T_VALUE:
                 addrs.add(o.addr)
                 if o.flags & F_VALUE_32:
@@ -233,11 +248,37 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         return info
 
     # ----------------------------------------------------------- konfigurace
+    @property
+    def protocol(self) -> int:
+        return self.desc.protocol
+
     def matrix_circuits(self):
+        if self.protocol >= 2:
+            return []
         return [o for o in self.desc.objects_of(T_LIGHT, T_SWITCH) if o.p1 != NO_MATRIX]
 
     def matrix_buttons(self):
+        if self.protocol >= 2:
+            return []
         return [o for o in self.desc.objects_of(T_BUTTON) if o.p1 != NO_MATRIX]
+
+    # protokol 2: tlačítka a cíle akcí
+    def buttons_v2(self):
+        return self.desc.objects_of(T_BUTTON)
+
+    def targets_v2(self):
+        return self.desc.objects_of(T_LIGHT, T_SWITCH, T_DIMMER)
+
+    def config_ranges_v2(self) -> list[tuple[int, int]]:
+        """Oblasti konfigurace (začátek, počet) pro čtecí okno a zálohy."""
+        ranges = []
+        nb = len(self.buttons_v2())
+        if nb:
+            ranges.append((0, nb * BTN_SLOTS))
+        params = self.desc.objects_of(T_NUMBER)
+        if params:
+            ranges.append((PARAM_INDEX_BASE, max(o.p3 for o in params) + 1))
+        return ranges
 
     async def _read_status(self, offset: int) -> int:
         return (await self.client.read_holding(self.desc.status_base + offset, 1))[0]
@@ -261,8 +302,42 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
                     raise ModbusError(f"PLC nepotvrdilo zápis konfigurace (seq {seq})")
         await self.async_request_refresh()
 
+    async def _read_window(self, start: int) -> list[int]:
+        await self.client.write_single(self.desc.status_base + S_WINDOW_REQ, start)
+        for _ in range(40):
+            vals = await self.client.read_holding(self.desc.window_base, WINDOW_REGS)
+            if vals[0] == start:
+                return vals[1:]
+            await asyncio.sleep(0.03)
+        raise ModbusError(f"PLC neodpovědělo na čtení bloku {start}")
+
+    async def _read_config_v2(self) -> dict:
+        d = self.desc
+        cfg_map: dict[str, int] = {}
+        async with self._cfg_lock:
+            for start, count in self.config_ranges_v2():
+                for blk in range(start, start + count, WINDOW_REGS - 1):
+                    vals = await self._read_window(blk)
+                    for j, v in enumerate(vals):
+                        if blk + j < start + count:
+                            cfg_map[str(blk + j)] = v
+            corr: dict[int, int] = {}
+            for t in d.objects_of(T_TEMP):
+                v = (await self.client.read_holding(t.addr + 2, 1))[0]
+                corr[t.p1] = signed16(v)
+            chk_plc = await self._read_status(S_CFG_CHECKSUM)
+        return {
+            "protocol": 2,
+            "map": cfg_map,
+            "corr": {str(k): v for k, v in corr.items()},
+            "checksum_plc": chk_plc,
+            "checksum_calc": config_checksum(cfg_map, corr, d.max_b, 2),
+        }
+
     async def read_config(self) -> dict:
-        """Načte matici tlačítko × okruh a korekce teplot přímo z PLC."""
+        """Načte konfiguraci přímo z PLC (protokol 1: matice tlačítko × okruh, 2: akce tlačítek a parametry)."""
+        if self.protocol >= 2:
+            return await self._read_config_v2()
         d = self.desc
         circuits = self.matrix_circuits()
         buttons = self.matrix_buttons()
@@ -299,6 +374,11 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
     def all_pairs(self, cfg_map: dict[str, int], corr: dict) -> list[tuple[int, int]]:
         d = self.desc
         pairs = []
+        if self.protocol >= 2:
+            pairs = [(int(k), int(v)) for k, v in cfg_map.items()]
+            for t in d.objects_of(T_TEMP):
+                pairs.append((CORR_INDEX_BASE + t.p1, int(corr.get(str(t.p1), corr.get(t.p1, 0)) or 0)))
+            return pairs
         for c in self.matrix_circuits():
             for b in self.matrix_buttons():
                 pairs.append((c.p1 * d.max_b + b.p1, int(cfg_map.get(f"{c.p1},{b.p1}", 0))))

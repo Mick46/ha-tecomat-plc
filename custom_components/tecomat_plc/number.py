@@ -1,4 +1,4 @@
-"""Konfigurační čísla: korekce teploty (typ TEMP)."""
+"""Konfigurační čísla: korekce teploty (typ TEMP) a parametry PLC (typ NUMBER)."""
 
 from __future__ import annotations
 
@@ -8,14 +8,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CORR_INDEX_BASE, T_TEMP
+from .const import CORR_INDEX_BASE, PARAM_INDEX_BASE, T_NUMBER, T_TEMP
 from .entity import TecomatEntity
 from .modbus_client import ModbusError
+from .sensor import UNITS
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback) -> None:
     coord = entry.runtime_data
-    async_add_entities(TecomatTempCorrection(coord, o) for o in coord.desc.objects_of(T_TEMP))
+    entities: list[NumberEntity] = [TecomatTempCorrection(coord, o) for o in coord.desc.objects_of(T_TEMP)]
+    entities += [TecomatParam(coord, o) for o in coord.desc.objects_of(T_NUMBER)]
+    async_add_entities(entities)
 
 
 class TecomatTempCorrection(TecomatEntity, NumberEntity):
@@ -41,3 +44,36 @@ class TecomatTempCorrection(TecomatEntity, NumberEntity):
             await self.coordinator.write_config([(CORR_INDEX_BASE + self.obj.p1, round(value * 10))])
         except ModbusError as err:
             raise HomeAssistantError(f"Zápis korekce selhal: {err}") from err
+
+
+def _s16(v: int) -> int:
+    return v - 65536 if v > 32767 else v
+
+
+class TecomatParam(TecomatEntity, NumberEntity):
+    """Parametr uložený v PLC (doby, jasy, teploty …). Zápis přes schránku, PLC ho uloží (RETAIN)."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator, obj) -> None:
+        super().__init__(coordinator, obj)
+        self._dec = obj.flags & 0x07
+        self._div = 10**self._dec
+        self._attr_native_min_value = _s16(obj.p1) / self._div
+        self._attr_native_max_value = _s16(obj.p2) / self._div
+        self._attr_native_step = 1 / self._div
+        self._attr_native_unit_of_measurement = UNITS.get(obj.flags >> 8)
+
+    @property
+    def native_value(self) -> float | None:
+        v = self.coordinator.get_signed(self.obj.addr)
+        if v is None:
+            return None
+        return v / self._div if self._dec else v
+
+    async def async_set_native_value(self, value: float) -> None:
+        try:
+            await self.coordinator.write_config([(PARAM_INDEX_BASE + self.obj.p3, round(value * self._div))])
+        except ModbusError as err:
+            raise HomeAssistantError(f"Zápis parametru selhal: {err}") from err

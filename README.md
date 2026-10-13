@@ -97,6 +97,22 @@ Adresy jsou Modbus holding registry (v PLC Tecomat platí `%RW(2·N)` = adresa `
 
 **Kontrolní součet:** `Σ kód·(index mod 251 + 1)` + `Σ korekce_u16·((10000+k) mod 251 + 1)`, vše mod 65536.
 
+## Protokol deskriptoru (verze 2)
+
+Program PLC vytvořený generátorem z popisu domu. Integrace podporuje obě verze současně.
+
+- **Hlavička** na HA adrese **20000** (verze 1: 24000), stejné položky 0–17 jako verze 1, navíc 18 = verze formátu konfigurace, 19 = počet parametrů. Meta 20050, testovací řetězce 23300, řetězce 23350 (0–63 skupiny, 64–127 oblasti, 128+ objekty), stav 30000, schránka 30100, čtecí okno 30200, data objektů od 30300.
+- **Skupiny = místnosti** (oblasti Home Assistant), skupina 0 = PLC.
+- **Nové typy objektů:**
+
+| Typ | Entita | Data | Parametry |
+|---|---|---|---|
+| 7 DIMMER | `light` s jasem | +0 žádaný jas 0–100 (zápis), +1 skutečný jas | – |
+| 10 NUMBER | `number` (konfigurace) | +0 hodnota (INT) | p1 min, p2 max, p3 index parametru; flags bity 0–2 desetinná místa, 8–15 jednotka |
+
+- **Konfigurace přes schránku a čtecí okno** (jedna hodnota na registr): `0..` akce tlačítek (16 registrů na tlačítko = 8 akcí: 0–3 krátký, 4–7 dlouhý stisk; akce = UID cíle, povel·256 + hodnota; povely 1 přepni, 2 zapni, 3 vypni, 4 jas = hodnota %, 5 jas + hodnota %), `10000..` korekce teplot, `20000..` parametry. Kontrolní součet = Σ hodnota·(index mod 251 + 1) mod 65536.
+- Nastavení ukládá PLC podle UID, takže přežije přegenerování programu.
+
 ## Vývoj a testy
 
 ```bash

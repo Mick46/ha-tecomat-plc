@@ -28,12 +28,13 @@ class VersionStore:
     def get(self, vid: str) -> dict | None:
         return next((v for v in self.versions if v["id"] == vid), None)
 
-    async def add(self, name: str, cfg_map: dict, corr: dict, source: str = "plc") -> dict:
+    async def add(self, name: str, cfg_map: dict, corr: dict, source: str = "plc", protocol: int = 1) -> dict:
         ver = {
             "id": uuid.uuid4().hex,
             "name": name,
             "ts": datetime.now(timezone.utc).isoformat(),
             "source": source,
+            "protocol": protocol,
             "map": dict(cfg_map),
             "corr": {str(k): v for k, v in corr.items()},
         }

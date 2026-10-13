@@ -66,6 +66,7 @@ UNITS = {
     7: LIGHT_LUX,
     8: UnitOfVolume.CUBIC_METERS,
     9: UnitOfTime.SECONDS,
+    10: UnitOfTime.MINUTES,
 }
 CLASSES = {
     1: SensorDeviceClass.POWER,

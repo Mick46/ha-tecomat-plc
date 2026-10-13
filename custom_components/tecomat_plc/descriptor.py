@@ -6,7 +6,7 @@ import struct
 from dataclasses import dataclass, field
 
 from .const import (
-    DESC_BASE,
+    DESC_BASES,
     DESC_MAGIC,
     H_AREA_OFS,
     H_GROUPS,
@@ -105,10 +105,12 @@ def _decode(raw: bytes) -> str:
 
 
 async def read_header(client) -> list[int]:
-    hdr = await client.read_holding(DESC_BASE, 32)
-    if hdr[H_MAGIC] != DESC_MAGIC:
-        raise InvalidDescriptor("V PLC chybí popis pro integraci (magic)")
-    return hdr
+    """Hlavička popisu: protokol 2 je na adrese 20000, protokol 1 na 24000."""
+    for base in DESC_BASES:
+        hdr = await client.read_holding(base, 32)
+        if hdr[H_MAGIC] == DESC_MAGIC and hdr[H_PROTOCOL] in (1, 2) and hdr[H_META_STRIDE] in (0, 8):
+            return hdr
+    raise InvalidDescriptor("V PLC chybí popis pro integraci (magic)")
 
 
 async def read_descriptor(client) -> Descriptor:

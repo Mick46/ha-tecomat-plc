@@ -10,7 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 
-from .const import DOMAIN, T_TEMP
+from .const import DOMAIN, T_DIMMER, T_TEMP
 from .modbus_client import ModbusError
 
 
@@ -74,6 +74,18 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
             {"idx": o.p1, "uid": o.uid, "name": o.name, "group": o.group, "addr": o.addr}
             for o in d.objects_of(T_TEMP)
         ],
+        "protocol": d.protocol,
+        "buttons2": [
+            {"b": i, "uid": o.uid, "name": o.name, "group": o.group} for i, o in enumerate(coord.buttons_v2())
+        ]
+        if d.protocol >= 2
+        else [],
+        "targets": [
+            {"uid": o.uid, "name": o.name, "group": o.group, "dimmer": o.type == T_DIMMER}
+            for o in coord.targets_v2()
+        ]
+        if d.protocol >= 2
+        else [],
     }
 
 
@@ -134,7 +146,7 @@ async def ws_versions_list(hass, coord, msg) -> list[dict]:
 async def ws_versions_save(hass, coord, msg) -> dict:
     """Uloží verzi z AKTUÁLNÍHO obsahu PLC (ne z prohlížeče)."""
     cfg = await coord.read_config()
-    return await coord.versions.add(msg["name"], cfg["map"], cfg["corr"])
+    return await coord.versions.add(msg["name"], cfg["map"], cfg["corr"], protocol=coord.protocol)
 
 
 @websocket_api.websocket_command(
@@ -151,6 +163,8 @@ async def ws_versions_restore(hass, coord, msg) -> dict:
     ver = coord.versions.get(msg["version_id"])
     if ver is None:
         raise ValueError("Verze neexistuje")
+    if ver.get("protocol", 1) != coord.protocol:
+        raise ValueError("Verze je uložená pro jiný program PLC (jiný formát konfigurace), nelze ji obnovit")
     pairs = coord.all_pairs(ver["map"], ver["corr"])
     await coord.write_config(pairs)
     return {"written": len(pairs)}
@@ -184,7 +198,7 @@ async def ws_versions_delete(hass, coord, msg) -> dict:
 @_with_coordinator
 async def ws_versions_import(hass, coord, msg) -> dict:
     """Import vytvoří jen novou verzi, do PLC se nic nezapisuje."""
-    return await coord.versions.add(msg["name"], msg["map"], msg["corr"], source="import")
+    return await coord.versions.add(msg["name"], msg["map"], msg["corr"], source="import", protocol=coord.protocol)
 
 
 @callback

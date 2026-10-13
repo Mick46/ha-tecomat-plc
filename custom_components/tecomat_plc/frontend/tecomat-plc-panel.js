@@ -4,7 +4,7 @@
 // (světlý / tmavý / vlastní), horní lišta, karty, tlačítka, ikony mdi a dialogy.
 //
 // Data přes websocket API integrace:
-//   tecomat_plc/entries, /info, /config/get, /config/set,
+//   tecomat_plc/entries, /info (protokol 1: matice, 2: akce tlačítek), /config/get, /config/set,
 //   /versions/list, /versions/save, /versions/restore, /versions/delete, /versions/import
 //
 // PLC je zdroj pravdy: konfigurace se čte z PLC, verze se ukládají ručně.
@@ -15,6 +15,9 @@ const GROUPS = [
   { key: "d", shift: 4, title: "Stmívání", opts: [[1, "Přidej"], [2, "Uber"]] },
 ];
 const CORR_BASE = 10000;
+// protokol 2: na tlačítko 16 registrů = 8 akcí (0–3 krátký, 4–7 dlouhý stisk), akce = [UID cíle, povel·256 + hodnota]
+const SLOTS = 16;
+const CMDS = [[1, "Přepni"], [2, "Zapni"], [3, "Vypni"], [4, "Jas na %", true], [5, "Jas přidat %", true]];
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -132,6 +135,12 @@ const STYLE = `
     color: var(--primary-text-color); font: inherit; font-size: 16px;
   }
   input[type=number] { width: 90px; }
+  td select {
+    height: 40px; max-width: 100%; box-sizing: border-box; padding: 0 8px; border-radius: 8px;
+    border: 1px solid var(--divider-color); background: var(--secondary-background-color, transparent);
+    color: var(--primary-text-color); font: inherit; font-size: 14px;
+  }
+  td select option, td select optgroup { color: var(--primary-text-color); background: var(--card-background-color); }
   input:focus { outline: 2px solid var(--primary-color); outline-offset: -1px; }
   .alert {
     display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin: 0 16px 8px;
@@ -183,6 +192,7 @@ class TecomatPlcPanel extends HTMLElement {
     this._error = "";
     this._dialog = null;
     this._narrow = false;
+    this._draft = null;
   }
 
   set hass(h) {
@@ -229,8 +239,9 @@ class TecomatPlcPanel extends HTMLElement {
     this._render();
     try {
       this._info = await this._ws("info");
-      if (this._sel === null || !this._info.buttons.find((b) => b.m === this._sel))
-        this._sel = this._info.buttons.length ? this._info.buttons[0].m : null;
+      const list = this._btnList();
+      if (this._sel === null || !list.find((b) => b.m === this._sel)) this._sel = list.length ? list[0].m : null;
+      this._draft = null;
       this._versions = await this._ws("versions/list");
       if (!this._base && this._versions.length) this._base = this._versions[0].id;
     } catch (e) {
@@ -262,6 +273,86 @@ class TecomatPlcPanel extends HTMLElement {
     }
     this._busy = "";
     this._render();
+  }
+
+  _v2() {
+    return !!(this._info && this._info.protocol >= 2);
+  }
+  _btnList() {
+    if (!this._info) return [];
+    return this._v2() ? this._info.buttons2.map((b) => ({ ...b, m: b.b })) : this._info.buttons;
+  }
+  // protokol 2: akce tlačítka z konfigurace (nebo rozpracovaný koncept)
+  _actions(b) {
+    if (this._draft && this._draft.b === b) return this._draft.acts;
+    const m = (this._cfg && this._cfg.map) || {};
+    const acts = [];
+    for (let a = 0; a < 8; a++) {
+      const uid = Number(m[String(b * SLOTS + a * 2)] || 0);
+      const cv = Number(m[String(b * SLOTS + a * 2 + 1)] || 0);
+      acts.push({ uid, cmd: uid ? cv >> 8 : 1, val: uid ? cv & 255 : 0 });
+    }
+    return acts;
+  }
+  _editAct(b, a, field, value) {
+    if (!this._draft || this._draft.b !== b) this._draft = { b, acts: this._actions(b).map((x) => ({ ...x })) };
+    this._draft.acts[a][field] = Number(value);
+    if (field === "uid" && Number(value) && !this._draft.acts[a].cmd) this._draft.acts[a].cmd = 1;
+    this._render();
+  }
+  async _saveActions(b) {
+    if (!this._draft || this._draft.b !== b) return;
+    const pairs = [];
+    this._draft.acts.forEach((x, a) => {
+      const cmd = x.uid ? Math.max(1, Math.min(5, x.cmd || 1)) : 0;
+      const val = cmd >= 4 ? Math.max(0, Math.min(100, x.val || 0)) : 0;
+      pairs.push([b * SLOTS + a * 2, x.uid || 0]);
+      pairs.push([b * SLOTS + a * 2 + 1, x.uid ? cmd * 256 + val : 0]);
+    });
+    await this._run("Zapisuji do PLC…", async () => {
+      await this._ws("config/set", { pairs });
+      this._cfg = await this._ws("config/get");
+      this._draft = null;
+      this._msg = "Akce tlačítka zapsány do PLC";
+    });
+  }
+  _renderActions(btn, ready) {
+    const info = this._info;
+    const acts = this._actions(btn.m);
+    const byGroup = {};
+    for (const t of info.targets) (byGroup[t.group] ||= []).push(t);
+    const targetOpts = (sel) =>
+      `<option value="0" ${sel ? "" : "selected"}>— nic —</option>` +
+      Object.entries(byGroup)
+        .map(
+          ([g, list]) =>
+            `<optgroup label="${esc(this._groupName(Number(g)))}">${list
+              .map((t) => `<option value="${t.uid}" ${t.uid === sel ? "selected" : ""}>${esc(t.name)}</option>`)
+              .join("")}</optgroup>`
+        )
+        .join("");
+    const row = (a) => {
+      const x = acts[a];
+      const tgt = info.targets.find((t) => t.uid === x.uid);
+      const cmdOpts = CMDS.filter((c) => !c[2] || (tgt && tgt.dimmer))
+        .map(([v, l]) => `<option value="${v}" ${v === x.cmd ? "selected" : ""}>${l}</option>`)
+        .join("");
+      const dis = ready ? "" : "disabled";
+      return `<tr>
+        <td class="left"><select class="act" data-a="${a}" data-f="uid" ${dis}>${targetOpts(x.uid)}</select></td>
+        <td><select class="act" data-a="${a}" data-f="cmd" ${dis || (x.uid ? "" : "disabled")}>${cmdOpts}</select></td>
+        <td>${x.uid && x.cmd >= 4 ? `<input class="actval" data-a="${a}" type="number" min="0" max="100" value="${x.val}" ${dis}>` : ""}</td>
+      </tr>`;
+    };
+    const part = (title, from) =>
+      `<tr><th class="left grp" colspan="3">${title}</th></tr>${[0, 1, 2, 3].map((i) => row(from + i)).join("")}`;
+    const dirty = this._draft && this._draft.b === btn.m;
+    return `
+      <div class="scroll"><table>${part("Krátký stisk", 0)}${part("Dlouhý stisk", 4)}</table></div>
+      <div class="card-actions">
+        <button class="btn" id="actcancel" ${dirty && ready ? "" : "disabled"}>Zrušit změny</button>
+        <button class="btn filled" id="actsave" ${dirty && ready ? "" : "disabled"}>${icon("mdi:content-save")}Zapsat do PLC</button>
+      </div>`;
   }
 
   _code(c, b) {
@@ -452,7 +543,7 @@ class TecomatPlcPanel extends HTMLElement {
     if (info) {
       // tlačítka
       const byGroup = {};
-      for (const b of info.buttons) (byGroup[b.group] ||= []).push(b);
+      for (const b of this._btnList()) (byGroup[b.group] ||= []).push(b);
       const buttons = Object.entries(byGroup)
         .map(
           ([g, list]) => `
@@ -501,8 +592,8 @@ class TecomatPlcPanel extends HTMLElement {
           </div>`;
       }
 
-      // matice
-      const btn = info.buttons.find((b) => b.m === this._sel);
+      // matice (protokol 1) nebo akce tlačítka (protokol 2)
+      const btn = this._btnList().find((b) => b.m === this._sel);
       const head = GROUPS.map((g) => `<th colspan="${g.opts.length}" class="grp">${g.title}</th>`).join("");
       const rows =
         this._cfg && btn
@@ -522,16 +613,23 @@ class TecomatPlcPanel extends HTMLElement {
               })
               .join("")
           : "";
+      const body = this._v2()
+        ? this._cfg && btn
+          ? this._renderActions(btn, ready)
+          : ""
+        : rows
+          ? `<div class="scroll"><table><tr><th class="left">Okruh</th>${head}</tr>${rows}</table></div>`
+          : "";
       right = `
         <div class="card">
           <div class="card-header">${icon("mdi:lightbulb-group")}
-            <div style="display:flex;flex-direction:column">Osvětlení
+            <div style="display:flex;flex-direction:column">${this._v2() ? "Akce tlačítka" : "Osvětlení"}
               <span class="sub">${btn ? `${esc(this._groupName(btn.group))} · ${esc(btn.name)}` : "Vyberte tlačítko"}</span>
             </div>
           </div>
           ${this._alerts()}
-          ${rows ? `<div class="scroll"><table><tr><th class="left">Okruh</th>${head}</tr>${rows}</table></div>` : ""}
-          <div class="note">Změna se zapíše do PLC okamžitě. Konfigurace je uložená v PLC a tlačítka podle ní fungují i bez Home Assistant.</div>
+          ${body}
+          <div class="note">${this._v2() ? "Až 4 akce na krátký a 4 na dlouhý stisk. Víc akcí „Přepni“ na jednom stisku funguje jako skupina: když svítí aspoň jedno, vše zhasne, jinak se vše rozsvítí. Změny se zapíšou tlačítkem Zapsat do PLC." : "Změna se zapíše do PLC okamžitě."} Konfigurace je uložená v PLC a tlačítka podle ní fungují i bez Home Assistant.</div>
         </div>`;
 
       // verze
@@ -599,11 +697,23 @@ class TecomatPlcPanel extends HTMLElement {
     const on = (sel, fn) => root.querySelectorAll(sel).forEach((el) => el.addEventListener("click", () => fn(el)));
     on(".item", (el) => {
       this._sel = Number(el.dataset.b);
+      this._draft = null;
       this._render();
     });
     on(".chip:not([disabled])", (el) =>
       this._toggleOpt(Number(el.dataset.c), this._sel, el.dataset.g, Number(el.dataset.v))
     );
+    root.querySelectorAll("select.act").forEach((el) =>
+      el.addEventListener("change", () => this._editAct(this._sel, Number(el.dataset.a), el.dataset.f, el.value))
+    );
+    root.querySelectorAll("input.actval").forEach((el) =>
+      el.addEventListener("change", () => this._editAct(this._sel, Number(el.dataset.a), "val", el.value))
+    );
+    on("#actsave", () => this._saveActions(this._sel));
+    on("#actcancel", () => {
+      this._draft = null;
+      this._render();
+    });
     on("button[data-corr]", (el) => {
       const idx = Number(el.dataset.corr);
       this._saveCorr(idx, root.getElementById(`in-${idx}`).value);

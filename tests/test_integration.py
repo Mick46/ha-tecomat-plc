@@ -355,3 +355,74 @@ async def test_value_sensors(hass: HomeAssistant) -> None:
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await plc.stop()
+
+
+async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
+    """Protokol 2 (program z generátoru): stmívač, parametry, akce tlačítek v panelu, verze."""
+    from .mock_plc_v2 import MockPlcV2
+
+    plc = MockPlcV2()
+    await plc.start()
+    try:
+        entry = await _setup(hass, plc)
+        coord = entry.runtime_data
+        assert coord.protocol == 2
+        ent = er.async_get(hass)
+        dev = dr.async_get(hass)
+
+        # zařízení podle oblastí
+        names = {d.name for d in dr.async_entries_for_config_entry(dev, entry.entry_id)}
+        assert {"CP-1000", "Kuchyň", "Chodba"} <= names
+
+        # stmívač
+        dim = ent.async_get_entity_id("light", DOMAIN, f"{entry.entry_id}_2")
+        await hass.services.async_call("light", "turn_on", {"entity_id": dim, "brightness": 128}, blocking=True)
+        assert plc.reg[30301] == 50
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        st = hass.states.get(dim)
+        assert st.state == "on" and st.attributes["brightness"] == 128
+        await hass.services.async_call("light", "turn_off", {"entity_id": dim}, blocking=True)
+        assert plc.reg[30301] == 0
+
+        # parametr (0,1 s) přes schránku
+        par = ent.async_get_entity_id("number", DOMAIN, f"{entry.entry_id}_30013")
+        assert float(hass.states.get(par).state) == 2.0
+        assert hass.states.get(par).attributes["unit_of_measurement"] == "s"
+        await hass.services.async_call("number", "set_value", {"entity_id": par, "value": 3.5}, blocking=True)
+        assert plc.box[20001] == 35
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert float(hass.states.get(par).state) == 3.5
+
+        # panel: info a konfigurace
+        ws = await hass_ws_client(hass)
+        await ws.send_json({"id": 1, "type": f"{DOMAIN}/info", "entry_id": entry.entry_id})
+        info = (await ws.receive_json())["result"]
+        assert info["protocol"] == 2 and info["buttons"] == [] and info["circuits"] == []
+        assert [b["uid"] for b in info["buttons2"]] == [2091, 203]
+        assert {t["uid"]: t["dimmer"] for t in info["targets"]} == {20: False, 2: True}
+
+        await ws.send_json({"id": 2, "type": f"{DOMAIN}/config/get", "entry_id": entry.entry_id})
+        cfg = (await ws.receive_json())["result"]
+        assert cfg["map"]["0"] == 20 and cfg["map"]["1"] == 256 and cfg["map"]["9"] == 4 * 256 + 50
+        assert cfg["map"]["20001"] == 35
+        assert cfg["checksum_plc"] == cfg["checksum_calc"]
+
+        # zápis akce tlačítka 1 (b = 1): krátce zapni bodovky
+        await ws.send_json({"id": 3, "type": f"{DOMAIN}/config/set", "entry_id": entry.entry_id,
+                            "pairs": [[16, 20], [17, 2 * 256]]})
+        assert (await ws.receive_json())["success"]
+        assert plc.box[16] == 20 and plc.box[17] == 512
+
+        # verze: uložit, změnit, obnovit
+        await ws.send_json({"id": 4, "type": f"{DOMAIN}/versions/save", "entry_id": entry.entry_id, "name": "v1"})
+        ver = (await ws.receive_json())["result"]
+        await ws.send_json({"id": 5, "type": f"{DOMAIN}/config/set", "entry_id": entry.entry_id, "pairs": [[16, 0], [20001, 99]]})
+        await ws.receive_json()
+        await ws.send_json({"id": 6, "type": f"{DOMAIN}/versions/restore", "entry_id": entry.entry_id, "version_id": ver["id"]})
+        assert (await ws.receive_json())["success"]
+        assert plc.box[16] == 20 and plc.box[20001] == 35
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    finally:
+        await plc.stop()
