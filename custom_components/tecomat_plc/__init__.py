@@ -6,6 +6,7 @@ zařízení a entity. Konfigurace tlačítek se dělá na stránce „Tecomat PL
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -39,7 +40,7 @@ from .websocket import async_register_websocket
 
 _LOGGER = logging.getLogger(__name__)
 
-PANEL_VERSION = "0.3.0"
+PANEL_JS = Path(__file__).parent / "frontend" / "tecomat-plc-panel.js"
 
 TecomatConfigEntry = ConfigEntry[TecomatCoordinator]
 
@@ -52,6 +53,9 @@ async def _async_setup_frontend(hass: HomeAssistant) -> None:
     """Statické soubory a websocket API jednou za běh HA."""
     store = hass.data.setdefault(DOMAIN, {})
     if not store.get("static"):
+        # značka verze skriptu = otisk obsahu: prohlížeč po aktualizaci integrace načte nový panel
+        data = await hass.async_add_executor_job(PANEL_JS.read_bytes)
+        store["panel_ver"] = hashlib.sha1(data).hexdigest()[:10]
         path = Path(__file__).parent / "frontend"
         await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(path), False)])
         async_register_websocket(hass)
@@ -85,7 +89,7 @@ async def _async_update_panel(hass: HomeAssistant, exclude: str | None = None) -
         hass,
         frontend_url_path=PANEL_URL,
         webcomponent_name=PANEL_COMPONENT,
-        module_url=f"{STATIC_URL}/tecomat-plc-panel.js?v={PANEL_VERSION}",
+        module_url=f"{STATIC_URL}/tecomat-plc-panel.js?v={store.get('panel_ver', '0')}",
         sidebar_title="Tecomat PLC" if wanted else None,
         sidebar_icon="mdi:light-switch" if wanted else None,
         require_admin=True,
