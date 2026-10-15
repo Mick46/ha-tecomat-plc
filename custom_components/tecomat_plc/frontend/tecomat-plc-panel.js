@@ -177,6 +177,57 @@ const STYLE = `
   .dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 `;
 
+const STYLE_V2 = `
+  .tabs { display: flex; gap: 2px; }
+  .tabs button { background: transparent; border: 0; color: inherit; opacity: .75; font: inherit; font-size: 15px;
+    padding: 0 12px; height: var(--header-height, 56px); cursor: pointer; border-bottom: 2px solid transparent; }
+  .tabs button.on { opacity: 1; border-bottom-color: currentColor; }
+  .content.three { grid-template-columns: minmax(200px, 240px) minmax(260px, 320px) 1fr; }
+  .content.three.narrow { grid-template-columns: 1fr; }
+  .item .count { margin-left: auto; font-size: 12px; color: var(--secondary-text-color); }
+  .sw { padding: 12px 16px 16px; border-top: 1px solid var(--divider-color); }
+  .swname { margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; }
+  .swname .secondary { font-size: 12px; color: var(--secondary-text-color); }
+  .swrow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .plate { display: inline-flex; gap: 4px; padding: 6px; border-radius: 10px;
+    background: var(--secondary-background-color); border: 2px solid var(--divider-color); }
+  .rocker { display: flex; flex-direction: column; gap: 4px; }
+  .key { width: 64px; height: 44px; border-radius: 6px; cursor: pointer; position: relative; font: inherit; font-size: 11px;
+    background: var(--card-background-color); color: var(--secondary-text-color); border: 1px solid var(--divider-color);
+    display: flex; align-items: center; justify-content: center; }
+  .key:hover { border-color: var(--primary-color); }
+  .key.sel { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
+  .key.round { width: 52px; height: 52px; border-radius: 50%; }
+  .key .cnt { position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px; border-radius: 9px; padding: 0 4px;
+    background: var(--success-color, #43a047); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; }
+  .tbox { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+  .tbox .big { font-size: 26px; line-height: 1.1; }
+  .tbox .lbl { color: var(--secondary-text-color); font-size: 12px; }
+  .corr { display: inline-flex; align-items: center; gap: 4px; }
+  .mini { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--divider-color); background: transparent;
+    color: var(--primary-text-color); cursor: pointer; font: inherit; }
+  .mini:hover:not([disabled]) { border-color: var(--primary-color); }
+  .counters { display: flex; gap: 16px; padding: 0 16px 8px; font-size: 13px; color: var(--secondary-text-color); }
+  .counters b { color: var(--primary-text-color); }
+  .counters .full b { color: var(--primary-color); }
+  .filters { display: flex; gap: 8px; align-items: center; padding: 0 16px 12px; flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--divider-color); border-radius: 8px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--primary-text-color); border: 0; padding: 6px 12px; cursor: pointer; font: inherit; }
+  .seg button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .filters select { height: 34px; border-radius: 8px; border: 1px solid var(--divider-color); padding: 0 8px; font: inherit;
+    background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .three td.left { white-space: nowrap; min-width: 150px; }
+  .three .chip { min-width: 0; padding: 0 10px; height: 30px; }
+  .three td { padding: 6px 3px; }
+  .chip.sm { padding: 0 8px; }
+  td.dim { white-space: nowrap; }
+  input.pct { width: 70px; height: 30px; margin-left: 4px; padding: 0 6px; }
+  input.num { width: 80px; height: 34px; }
+  .unit { margin-left: 4px; font-size: 12px; color: var(--secondary-text-color); }
+  td.bigtd { font-size: 18px; }
+  .vers { max-width: 900px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+`;
+
 class TecomatPlcPanel extends HTMLElement {
   constructor() {
     super();
@@ -195,6 +246,12 @@ class TecomatPlcPanel extends HTMLElement {
     this._narrow = false;
     this._draft = null;
     this._room = null;
+    this._tab = "ctl";
+    this._swKey = null;
+    this._pos = 1;
+    this._mode = "room";
+    this._otherRoom = null;
+    this._setRoom = null;
   }
 
   set hass(h) {
@@ -242,13 +299,8 @@ class TecomatPlcPanel extends HTMLElement {
     try {
       this._info = await this._ws("info");
       const list = this._btnList();
-      if (this._v2()) {
-        const rooms = this._rooms();
-        if (this._room === null || !rooms.find((r) => r.id === this._room)) this._room = rooms.length ? rooms[0].id : null;
-        const inRoom = list.filter((b) => b.group === this._room);
-        if (this._sel === null || !inRoom.find((b) => b.m === this._sel)) this._sel = inRoom.length ? inRoom[0].m : null;
-      } else if (this._sel === null || !list.find((b) => b.m === this._sel)) this._sel = list.length ? list[0].m : null;
-      this._draft = null;
+      if (!this._v2() && (this._sel === null || !list.find((b) => b.m === this._sel)))
+        this._sel = list.length ? list[0].m : null;
       this._versions = await this._ws("versions/list");
       if (!this._base && this._versions.length) this._base = this._versions[0].id;
     } catch (e) {
@@ -301,38 +353,6 @@ class TecomatPlcPanel extends HTMLElement {
     }
     return acts;
   }
-  _editAct(b, a, field, value) {
-    if (!this._draft || this._draft.b !== b) this._draft = { b, acts: this._actions(b).map((x) => ({ ...x })) };
-    this._draft.acts[a][field] = Number(value);
-    if (field === "uid" && Number(value) && !this._draft.acts[a].cmd) this._draft.acts[a].cmd = 1;
-    this._render();
-  }
-  async _saveActions(b) {
-    if (!this._draft || this._draft.b !== b) return;
-    const pairs = [];
-    this._draft.acts.forEach((x, a) => {
-      const cmd = x.uid ? Math.max(1, Math.min(5, x.cmd || 1)) : 0;
-      const val = cmd >= 4 ? Math.max(0, Math.min(100, x.val || 0)) : 0;
-      pairs.push([b * SLOTS + a * 2, x.uid || 0]);
-      pairs.push([b * SLOTS + a * 2 + 1, x.uid ? cmd * 256 + val : 0]);
-    });
-    await this._run("Zapisuji do PLC…", async () => {
-      await this._ws("config/set", { pairs });
-      this._cfg = await this._ws("config/get");
-      this._draft = null;
-      this._msg = "Akce tlačítka zapsány do PLC";
-    });
-  }
-  // místnosti (skupiny), které mají tlačítka, parametry nebo teploty
-  _rooms() {
-    const info = this._info;
-    const cnt = {};
-    const add = (g, k) => ((cnt[g] ||= { b: 0, p: 0, t: 0 })[k] += 1);
-    info.buttons2.forEach((x) => add(x.group, "b"));
-    (info.params || []).forEach((x) => add(x.group, "p"));
-    info.temps.forEach((x) => add(x.group, "t"));
-    return info.groups.filter((g) => cnt[g.id]).map((g) => ({ ...g, ...cnt[g.id] }));
-  }
   _targetLabel(t, withRoom = true) {
     return `${withRoom ? this._groupName(t.group) + " · " : ""}${t.sub} · ${t.name}`;
   }
@@ -351,94 +371,6 @@ class TecomatPlcPanel extends HTMLElement {
       this._msg = `${p.name}: zapsáno do PLC`;
     });
   }
-  _layoutV2(ready) {
-    const info = this._info;
-    const fmtT = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
-    const rooms = this._rooms();
-    const roomList = rooms
-      .map(
-        (r) => `
-        <div class="item ${r.id === this._room ? "sel" : ""}" data-room="${r.id}">
-          ${icon(r.id === 0 ? "mdi:server" : "mdi:sofa")}
-          <div class="text"><span class="name">${esc(r.name)}</span>
-            <span class="secondary">${[r.b && `${r.b} tl.`, r.p && `${r.p} nast.`, r.t && `${r.t} tepl.`].filter(Boolean).join(" · ")}</span></div>
-        </div>`
-      )
-      .join("");
-    const buttons = info.buttons2.filter((b) => b.group === this._room);
-    const btnItems = buttons
-      .map(
-        (b) => `
-        <div class="item ${b.b === this._sel ? "sel" : ""}" data-b="${b.b}">
-          ${icon("mdi:gesture-tap-button")}
-          <div class="text"><span class="name">${esc(b.name)}</span></div>
-        </div>`
-      )
-      .join("");
-    let left = `
-      <div class="card">
-        <div class="card-header">${icon("mdi:floor-plan")}Místnosti</div>
-        ${roomList || `<div class="empty">Nic k nastavení.</div>`}
-        <div style="height:8px"></div>
-      </div>`;
-    if (buttons.length)
-      left += `
-      <div class="card">
-        <div class="card-header">${icon("mdi:gesture-tap-button")}Tlačítka</div>
-        ${btnItems}
-        <div style="height:8px"></div>
-      </div>`;
-
-    const btn = buttons.find((b) => b.b === this._sel);
-    let right = `
-      <div class="card">
-        <div class="card-header">${icon("mdi:lightbulb-group")}
-          <div style="display:flex;flex-direction:column">${esc(this._groupName(this._room))}
-            <span class="sub">${btn ? esc(btn.name) : buttons.length ? "Vyberte tlačítko" : "Bez tlačítek"}</span>
-          </div>
-        </div>
-        ${this._alerts()}
-        ${btn && this._cfg ? this._renderActions({ ...btn, m: btn.b }, ready) : ""}
-        ${btn ? `<div class="note">Až 4 akce na krátký a 4 na dlouhý stisk. Víc akcí „Přepni“ na jednom stisku funguje jako skupina: když svítí aspoň jedno, vše zhasne, jinak se vše rozsvítí.</div>` : ""}
-      </div>`;
-
-    // nastavení místnosti: parametry a korekce teplot
-    const params = (info.params || []).filter((p) => p.group === this._room);
-    const temps = info.temps.filter((t) => t.group === this._room);
-    if (params.length || temps.length) {
-      const prow = params
-        .map(
-          (p) => `
-          <tr>
-            <td class="left">${esc(p.name)}</td>
-            <td><input id="par-${p.p}" type="number" step="${1 / 10 ** p.dec}" min="${p.min / 10 ** p.dec}" max="${p.max / 10 ** p.dec}"
-              value="${this._cfg ? this._paramValue(p) : ""}" ${ready ? "" : "disabled"}> ${esc(p.unit)}</td>
-            <td><button class="btn outlined" data-par="${p.p}" ${ready ? "" : "disabled"}>Uložit</button></td>
-          </tr>`
-        )
-        .join("");
-      const trow = temps
-        .map((t) => {
-          const tv = (this._cfg && this._cfg.temps[String(t.idx)]) || {};
-          const corr = this._cfg ? (this._cfg.corr[String(t.idx)] || 0) / 10 : 0;
-          return `
-          <tr>
-            <td class="left">${esc(t.name)} – korekce<span class="secondary">naměřeno ${fmtT(tv.raw)}, výsledek ${fmtT(tv.cor)}</span></td>
-            <td><input id="in-${t.idx}" type="number" step="0.1" min="-10" max="10" value="${corr.toFixed(1)}" ${ready ? "" : "disabled"}> °C</td>
-            <td><button class="btn outlined" data-corr="${t.idx}" ${ready ? "" : "disabled"}>Uložit</button></td>
-          </tr>`;
-        })
-        .join("");
-      right += `
-        <div class="card">
-          <div class="card-header">${icon("mdi:tune-variant")}Nastavení místnosti</div>
-          <div class="scroll"><table>${prow}${trow}</table></div>
-          <div class="note">Hodnoty jsou uložené v PLC a platí i bez Home Assistant.</div>
-        </div>`;
-    }
-    return [left, right];
-  }
-
   _versionsCard(ready) {
     const versions = this._versions.length
       ? this._versions
@@ -468,43 +400,373 @@ class TecomatPlcPanel extends HTMLElement {
       </div>`;
   }
 
-  _renderActions(btn, ready) {
-    const info = this._info;
-    const acts = this._actions(btn.m);
-    const byGroup = {};
-    for (const t of info.targets) (byGroup[t.group] ||= []).push(t);
-    const targetOpts = (sel) =>
-      `<option value="0" ${sel ? "" : "selected"}>— nic —</option>` +
-      Object.entries(byGroup)
-        .map(
-          ([g, list]) =>
-            `<optgroup label="${esc(this._groupName(Number(g)))}">${list
-              .map((t) => `<option value="${t.uid}" ${t.uid === sel ? "selected" : ""}>${esc(this._targetLabel(t))}</option>`)
-              .join("")}</optgroup>`
-        )
-        .join("");
-    const row = (a) => {
-      const x = acts[a];
-      const tgt = info.targets.find((t) => t.uid === x.uid);
-      const cmdOpts = CMDS.filter((c) => !c[2] || (tgt && tgt.dimmer))
-        .map(([v, l]) => `<option value="${v}" ${v === x.cmd ? "selected" : ""}>${l}</option>`)
-        .join("");
-      const dis = ready ? "" : "disabled";
-      return `<tr>
-        <td class="left" style="width:60%"><select class="act wide" data-a="${a}" data-f="uid" ${dis}>${targetOpts(x.uid)}</select></td>
-        <td><select class="act" data-a="${a}" data-f="cmd" ${dis || (x.uid ? "" : "disabled")}>${cmdOpts}</select></td>
-        <td>${x.uid && x.cmd >= 4 ? `<input class="actval" data-a="${a}" type="number" min="0" max="100" value="${x.val}" ${dis}>` : ""}</td>
-      </tr>`;
+  // ================================================================ protokol 2: záložky
+  // Ovladače (grafický vypínač + akce), Nastavení (parametry a korekce po místnostech), Zálohy
+
+  _switches() {
+    const map = new Map();
+    for (const b of this._info.buttons2) {
+      const key = b.sw ? `w${b.sw}` : `b${b.b}`;
+      if (!map.has(key)) {
+        const name = b.sw ? b.name.replace(/ klapka.*$/, "") : b.name;
+        map.set(key, { key, sw: b.sw, name, group: b.group, type: b.sw ? b.swtype : 1, keys: {} });
+      }
+      map.get(key).keys[b.sw ? b.pos : 1] = b.b;
+    }
+    return [...map.values()];
+  }
+  _swTemp(sw) {
+    return sw.sw ? this._info.temps.find((t) => t.sw === sw.sw) : null;
+  }
+  _actCount(b, long) {
+    return this._actions(b).filter((a, i) => a.uid && (i >= 4) === long).length;
+  }
+  async _writeActions(b, acts) {
+    // zhutnit: krátký stisk do slotů 0–3, dlouhý do 4–7
+    const short = acts.filter((a, i) => a.uid && i < 4);
+    const long = acts.filter((a, i) => a.uid && i >= 4);
+    const slots = [...short, ...Array(4 - short.length).fill(null), ...long, ...Array(4 - long.length).fill(null)];
+    const pairs = [];
+    slots.forEach((x, a) => {
+      pairs.push([b * SLOTS + a * 2, x ? x.uid : 0]);
+      pairs.push([b * SLOTS + a * 2 + 1, x ? x.cmd * 256 + (x.val || 0) : 0]);
+    });
+    await this._run("Zapisuji do PLC…", async () => {
+      await this._ws("config/set", { pairs });
+      this._cfg = await this._ws("config/get");
+      this._msg = "Zapsáno do PLC";
+    });
+  }
+  async _toggleAct(b, uid, long, cmd, val, fromInput = false) {
+    if (!this._cfg || this._busy) return;
+    const acts = this._actions(b).map((x) => ({ ...x }));
+    const from = long ? 4 : 0;
+    const i = acts.findIndex((a, k) => a.uid === uid && k >= from && k < from + 4);
+    if (i >= 0 && acts[i].cmd === cmd && !fromInput) acts[i] = { uid: 0, cmd: 1, val: 0 };
+    else if (i >= 0) acts[i] = { uid, cmd, val };
+    else {
+      const free = acts.findIndex((a, k) => !a.uid && k >= from && k < from + 4);
+      if (free < 0) {
+        this._error = "Na jeden stisk jdou nejvýš 4 akce.";
+        this._render();
+        return;
+      }
+      acts[free] = { uid, cmd, val };
+    }
+    await this._writeActions(b, acts);
+  }
+  async _stepCorr(t, d) {
+    const cur = (Number((this._cfg && this._cfg.corr[String(t.idx)]) || 0) + d) / 10;
+    await this._saveCorr(t.idx, Math.max(-10, Math.min(10, cur)).toFixed(1));
+  }
+  _exportVersion(ver) {
+    const map = ver ? ver.map : this._cfg.map;
+    const corr = ver ? ver.corr : this._cfg.corr;
+    const data = {
+      type: "tecomat-plc-ovladace",
+      exported: new Date().toISOString(),
+      plc: this._info ? this._info.model : "",
+      protocol: this._info ? this._info.protocol : 1,
+      name: ver ? ver.name : "aktuální konfigurace",
+      current: { map, corr },
+      versions: [],
     };
-    const part = (title, from) =>
-      `<tr><th class="left grp" colspan="3">${title}</th></tr>${[0, 1, 2, 3].map((i) => row(from + i)).join("")}`;
-    const dirty = this._draft && this._draft.b === btn.m;
-    return `
-      <div class="scroll"><table>${part("Krátký stisk", 0)}${part("Dlouhý stisk", 4)}</table></div>
-      <div class="card-actions">
-        <button class="btn" id="actcancel" ${dirty && ready ? "" : "disabled"}>Zrušit změny</button>
-        <button class="btn filled" id="actsave" ${dirty && ready ? "" : "disabled"}>${icon("mdi:content-save")}Zapsat do PLC</button>
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    const d = new Date();
+    const p = (x) => String(x).padStart(2, "0");
+    const slug = (ver ? ver.name : "aktualni").normalize("NFKD").replace(/[^\w-]+/g, "-").replace(/-+/g, "-").slice(0, 40);
+    a.href = URL.createObjectURL(blob);
+    a.download = `tecomat-${slug}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  _drawSwitch(sw) {
+    const k = (pos, label, cls = "") => {
+      const b = sw.keys[pos];
+      if (b === undefined) return "";
+      const n = this._actCount(b, false) + this._actCount(b, true);
+      const sel = this._swKey === sw.key && this._pos === pos ? "sel" : "";
+      return `<button class="key ${cls} ${sel}" data-sw="${sw.key}" data-pos="${pos}">${label}${n ? `<span class="cnt">${n}</span>` : ""}</button>`;
+    };
+    if (sw.type === 1) return `<div class="plate">${k(1, "", "round")}</div>`;
+    if (sw.type === 2) return `<div class="plate"><div class="rocker">${k(1, "UP")}${k(2, "DOWN")}</div></div>`;
+    return `<div class="plate"><div class="rocker">${k(1, "UP")}${k(2, "DOWN")}</div><div class="rocker">${k(3, "UP")}${k(4, "DOWN")}</div></div>`;
+  }
+  _tempBox(t, ready) {
+    const tv = (this._cfg && this._cfg.temps[String(t.idx)]) || {};
+    const corr = this._cfg ? (this._cfg.corr[String(t.idx)] || 0) / 10 : 0;
+    const f = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
+    const dis = ready ? "" : "disabled";
+    return `<div class="tbox">
+      <span class="big">${f(tv.cor)}</span>
+      <span class="lbl">naměřeno ${f(tv.raw)}</span>
+      <span class="lbl corr">korekce <button class="mini" data-corr="${t.idx}" data-d="-1" ${dis}>−</button><span>${corr > 0 ? "+" : ""}${corr.toFixed(1)}</span><button class="mini" data-corr="${t.idx}" data-d="1" ${dis}>+</button></span>
+    </div>`;
+  }
+
+  _tabCtl(ready) {
+    const info = this._info;
+    const sws = this._switches();
+    const per = {};
+    for (const x of sws) per[x.group] = (per[x.group] || 0) + 1;
+    const rooms = info.groups.filter((g) => per[g.id]);
+    if (this._room === null || !per[this._room]) this._room = rooms.length ? rooms[0].id : null;
+    const list = sws.filter((x) => x.group === this._room);
+    let sw = list.find((x) => x.key === this._swKey);
+    if (!sw) {
+      sw = list[0] || null;
+      this._swKey = sw ? sw.key : null;
+      this._pos = 1;
+    }
+    const roomCard = `<div class="card"><div class="card-header">${icon("mdi:floor-plan")}Místnosti</div>
+      ${rooms.map((r) => `<div class="item ${r.id === this._room ? "sel" : ""}" data-room="${r.id}"><div class="text"><span class="name">${esc(r.name)}</span></div><span class="count">${per[r.id]}</span></div>`).join("")}
+      <div style="height:8px"></div></div>`;
+    const swCard = `<div class="card"><div class="card-header">${icon("mdi:light-switch")}<div style="display:flex;flex-direction:column">Ovladače<span class="sub">${esc(this._groupName(this._room))}</span></div></div>
+      ${list
+        .map((x) => {
+          const t = this._swTemp(x);
+          return `<div class="sw"><div class="swname">${esc(x.name)}<span class="secondary">${x.type === 4 ? "WSB2-40" : x.type === 2 ? "WSB2-20" : "tlačítko na vstupu"}</span></div>
+            <div class="swrow">${this._drawSwitch(x)}${t ? this._tempBox(t, ready) : ""}</div></div>`;
+        })
+        .join("")}</div>`;
+    let right = `<div class="card"><div class="card-header">${icon("mdi:gesture-tap-button")}Akce</div>${this._alerts()}<div class="empty">Vyberte ovladač.</div></div>`;
+    if (sw && this._cfg) {
+      const b = sw.keys[this._pos] ?? sw.keys[1];
+      const keyName = sw.type === 1 ? "tlačítko" : sw.type === 2 ? (this._pos === 1 ? "klapka UP" : "klapka DOWN")
+        : ["", "klapka levá UP", "klapka levá DOWN", "klapka pravá UP", "klapka pravá DOWN"][this._pos];
+      const acts = this._actions(b);
+      const sN = this._actCount(b, false), lN = this._actCount(b, true);
+      const targetRoom = this._otherRoom ?? sw.group;
+      let targets = info.targets;
+      if (this._mode === "room") targets = targets.filter((t) => t.group === targetRoom);
+      if (this._mode === "sel") targets = targets.filter((t) => acts.some((a) => a.uid === t.uid));
+      const cell = (t, long) => {
+        const a = acts.find((x, i) => x.uid === t.uid && (i >= 4) === long);
+        const cmd = a ? a.cmd : 0;
+        const dis = ready ? "" : "disabled";
+        const L = long ? 1 : 0;
+        let h = [[1, "Přepni"], [3, "Vypni"], [2, "Zapni"]]
+          .map(([c, l]) => `<td><button class="chip ${cmd === c ? "on" : ""}" data-t="${t.uid}" data-l="${L}" data-c="${c}" ${dis}>${l}</button></td>`)
+          .join("");
+        h += t.dimmer
+          ? `<td class="dim"><button class="chip sm ${cmd === 4 ? "on" : ""}" data-t="${t.uid}" data-l="${L}" data-c="4" ${dis}>Jas</button><button class="chip sm ${cmd === 5 ? "on" : ""}" data-t="${t.uid}" data-l="${L}" data-c="5" ${dis}>+</button>${cmd >= 4 ? `<input class="pct" data-t="${t.uid}" data-l="${L}" data-c="${cmd}" type="number" min="0" max="100" value="${a.val}" ${dis}>%` : ""}</td>`
+          : "<td></td>";
+        return h;
+      };
+      right = `<div class="card">
+        <div class="card-header">${icon("mdi:gesture-tap-button")}<div style="display:flex;flex-direction:column">${esc(this._groupName(sw.group))} · ${esc(sw.name)}<span class="sub">${esc(keyName)}</span></div></div>
+        ${this._alerts()}
+        <div class="counters"><span class="${sN >= 4 ? "full" : ""}">Krátký stisk <b>${sN}/4</b></span><span class="${lN >= 4 ? "full" : ""}">Dlouhý stisk <b>${lN}/4</b></span></div>
+        <div class="filters">
+          <div class="seg">${[["room", "Místnost"], ["all", "Vše"], ["sel", "Vybrané"]].map(([m, l]) => `<button data-mode="${m}" class="${this._mode === m ? "on" : ""}">${l}</button>`).join("")}</div>
+          ${this._mode === "room" ? `<select id="otherroom">${info.groups.filter((g) => info.targets.some((t) => t.group === g.id)).map((g) => `<option value="${g.id}" ${g.id === targetRoom ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select>` : ""}
+        </div>
+        <div class="scroll"><table>
+          <tr><th class="left"></th><th class="grp" colspan="4">Krátký stisk</th><th class="grp" colspan="4">Dlouhý stisk</th></tr>
+          ${targets.map((t) => `<tr><td class="left">${esc(t.sub)} · ${esc(t.name)}${this._mode !== "room" ? `<span class="secondary">${esc(this._groupName(t.group))}</span>` : ""}</td>${cell(t, false)}${cell(t, true)}</tr>`).join("") || `<tr><td class="left" colspan="9">Žádné cíle.</td></tr>`}
+        </table></div>
+        <div class="note">Klik akci zapne nebo vypne a hned ji zapíše do PLC. U stmívače „Jas“ nastaví jas na %, „+“ přidá %. Víc akcí „Přepni“ na jednom stisku = skupina: svítí-li něco, vše zhasne, jinak se vše rozsvítí. Tlačítka fungují podle této konfigurace i bez Home Assistant.</div>
       </div>`;
+    }
+    return `<div class="content three ${this._narrow ? "narrow" : ""}"><div class="col">${roomCard}</div><div class="col">${swCard}</div><div class="col">${right}</div></div>`;
+  }
+
+  _tabSet(ready) {
+    const info = this._info;
+    const params = info.params || [];
+    const byTarget = {};
+    for (const p of params) (byTarget[p.target] ||= {})[p.kind] = p;
+    const objs = info.targets.filter((t) => byTarget[t.uid]);
+    const cnt = {};
+    for (const t of objs) cnt[t.group] = (cnt[t.group] || 0) + 1;
+    for (const t of info.temps) cnt[t.group] = (cnt[t.group] || 0) + 1;
+    const rooms = info.groups.filter((g) => cnt[g.id]);
+    if (this._setRoom === null || !cnt[this._setRoom]) this._setRoom = rooms.length ? rooms[0].id : null;
+    const COLS = [[1, "Max. doba"], [2, "Max. jas"], [3, "Náběh"]];
+    const mine = objs.filter((t) => t.group === this._setRoom);
+    const cols = COLS.filter(([k]) => mine.some((t) => byTarget[t.uid][k]));
+    const dis = ready ? "" : "disabled";
+    const rows = mine
+      .map((t) => `<tr><td class="left">${esc(t.sub)} · ${esc(t.name)}</td>${cols
+        .map(([k]) => {
+          const p = byTarget[t.uid][k];
+          return `<td>${p ? `<input class="num" data-par="${p.p}" type="number" step="${1 / 10 ** p.dec}" min="${p.min / 10 ** p.dec}" max="${p.max / 10 ** p.dec}" value="${this._cfg ? this._paramValue(p) : ""}" ${dis}><span class="unit">${esc(p.unit)}</span>` : ""}</td>`;
+        })
+        .join("")}</tr>`)
+      .join("");
+    const temps = info.temps.filter((t) => t.group === this._setRoom);
+    const f = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
+    const trows = temps
+      .map((t) => {
+        const tv = (this._cfg && this._cfg.temps[String(t.idx)]) || {};
+        const c = this._cfg ? (this._cfg.corr[String(t.idx)] || 0) / 10 : 0;
+        return `<tr><td class="left">${esc(t.name)}<span class="secondary">naměřeno ${f(tv.raw)}</span></td>
+          <td><span class="corr"><button class="mini" data-corr="${t.idx}" data-d="-1" ${dis}>−</button><span>${c > 0 ? "+" : ""}${c.toFixed(1)}</span><button class="mini" data-corr="${t.idx}" data-d="1" ${dis}>+</button></span></td>
+          <td class="bigtd">${f(tv.cor)}</td></tr>`;
+      })
+      .join("");
+    const roomCard = `<div class="card"><div class="card-header">${icon("mdi:floor-plan")}Místnosti</div>
+      ${rooms.map((r) => `<div class="item ${r.id === this._setRoom ? "sel" : ""}" data-setroom="${r.id}"><div class="text"><span class="name">${esc(r.name)}</span></div><span class="count">${cnt[r.id]}</span></div>`).join("")}
+      <div style="height:8px"></div></div>`;
+    const main =
+      `<div class="card"><div class="card-header">${icon("mdi:tune-variant")}${esc(this._groupName(this._setRoom))}</div>${this._alerts()}` +
+      (mine.length
+        ? `<div class="scroll"><table><tr><th class="left"></th>${cols.map(([, l]) => `<th>${l}</th>`).join("")}</tr>${rows}</table></div>
+           <div class="note">Hodnota se zapíše do PLC po opuštění pole. Max. doba 0 = bez omezení, po uplynutí PLC výstup vypne (i bez Home Assistant). Náběh = doba rozsvícení stmívače z 0 na 100 %.</div>`
+        : "") +
+      `</div>` +
+      (temps.length
+        ? `<div class="card"><div class="card-header">${icon("mdi:thermometer")}Teploty</div>
+           <div class="scroll"><table><tr><th class="left"></th><th>Korekce</th><th>Výsledek</th></tr>${trows}</table></div></div>`
+        : "");
+    return `<div class="content ${this._narrow ? "narrow" : ""}"><div class="col">${roomCard}</div><div class="col">${main}</div></div>`;
+  }
+
+  _tabVer(ready) {
+    const base = this._version(this._base);
+    const vers = this._versions.length
+      ? this._versions
+          .map((v) => `
+        <div class="ver ${this._base === v.id ? "cur" : ""}">
+          ${icon(v.source === "import" ? "mdi:file-import" : "mdi:history")}
+          <div class="text"><span>${esc(v.name)}</span>
+            <span class="secondary">${new Date(v.ts).toLocaleString("cs-CZ")}${v.source === "import" ? " · import" : ""}${(v.protocol || 1) !== this._info.protocol ? " · jiný formát programu" : ""}</span></div>
+          <button class="btn" data-restore="${v.id}" ${ready && (v.protocol || 1) === this._info.protocol ? "" : "disabled"}>${icon("mdi:restore")}Obnovit do PLC</button>
+          <button class="btn" data-exportver="${v.id}">${icon("mdi:download")}Export</button>
+          <button class="iconbtn" style="color:var(--secondary-text-color)" data-del="${v.id}" title="Smazat" ${this._busy ? "disabled" : ""}>${icon("mdi:delete")}</button>
+        </div>`)
+          .join("")
+      : `<div class="empty">Zatím žádná uložená verze.</div>`;
+    return `<div class="vers">
+      <div class="card">
+        <div class="card-header">${icon("mdi:memory")}<div style="display:flex;flex-direction:column">Aktuální konfigurace v PLC<span class="sub">akce tlačítek, nastavení a korekce teplot</span></div></div>
+        ${this._alerts()}
+        <div class="card-actions">
+          <button class="btn" id="importbtn" ${this._busy ? "disabled" : ""}>${icon("mdi:upload")}Import ze souboru</button>
+          <button class="btn" id="exportcur" ${ready ? "" : "disabled"}>${icon("mdi:download")}Export aktuální</button>
+          <button class="btn filled" id="savever" ${ready ? "" : "disabled"}>${icon("mdi:content-save")}Uložit jako novou verzi</button>
+          <input id="importfile" type="file" accept=".json,application/json" style="display:none">
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">${icon("mdi:history")}<div style="display:flex;flex-direction:column">Uložené verze<span class="sub">společné pro všechny uživatele, součást záloh Home Assistant</span></div></div>
+        ${vers}
+        <div class="note">Obnovení zapíše verzi do PLC. Import uloží soubor jako novou verzi, do PLC se zapíše až tlačítkem Obnovit.${base ? "" : ""}</div>
+      </div></div>`;
+  }
+
+  _renderV2() {
+    const info = this._info;
+    const ready = !!(info && this._cfg && !this._busy);
+    const tab = this._tab || "ctl";
+    const entrySel =
+      this._entries.length > 1
+        ? `<select id="entry">${this._entries.map((e) => `<option value="${e.entry_id}" ${e.entry_id === this._entry ? "selected" : ""}>${esc(e.title)}</option>`).join("")}</select>`
+        : "";
+    const body = tab === "set" ? this._tabSet(ready) : tab === "ver" ? this._tabVer(ready) : this._tabCtl(ready);
+    const dlg = this._dialog
+      ? `<div class="backdrop" id="dlg-bg"><div class="dialog" role="dialog">
+          <h2>${esc(this._dialog.title)}</h2>
+          ${this._dialog.text ? `<p>${this._dialog.text}</p>` : ""}
+          ${this._dialog.input !== null ? `<input id="dlg-input" type="text" value="${esc(this._dialog.input)}">` : ""}
+          <div class="actions"><button class="btn" id="dlg-cancel">Zrušit</button>
+            <button class="btn ${this._dialog.danger ? "danger" : "filled"}" id="dlg-ok">${esc(this._dialog.ok)}</button></div></div></div>`
+      : "";
+    this.shadowRoot.innerHTML = `
+      <style>${STYLE}${STYLE_V2}</style>
+      <div class="toolbar">
+        <ha-menu-button></ha-menu-button>
+        <div class="title">Tecomat PLC <span style="opacity:.7;font-size:14px">${esc(info.model)} · program ${info.program}</span></div>
+        <div class="tabs">${[["ctl", "Ovladače"], ["set", "Nastavení"], ["ver", "Zálohy"]].map(([t, l]) => `<button data-tab="${t}" class="${tab === t ? "on" : ""}">${l}</button>`).join("")}</div>
+        ${entrySel}
+        <button class="iconbtn" id="reload" title="Načíst z PLC" ${this._busy || !this._entry ? "disabled" : ""}>${icon("mdi:refresh")}</button>
+      </div>
+      ${body}
+      ${dlg}`;
+    const root = this.shadowRoot;
+    const mb = root.querySelector("ha-menu-button");
+    if (mb) {
+      mb.hass = this._hass;
+      mb.narrow = this._narrow;
+    }
+    const on = (sel, fn) => root.querySelectorAll(sel).forEach((el) => el.addEventListener("click", () => fn(el)));
+    on("[data-tab]", (el) => {
+      this._tab = el.dataset.tab;
+      this._error = "";
+      this._render();
+    });
+    on("[data-room]", (el) => {
+      this._room = Number(el.dataset.room);
+      this._swKey = null;
+      this._otherRoom = null;
+      this._render();
+    });
+    on("[data-setroom]", (el) => {
+      this._setRoom = Number(el.dataset.setroom);
+      this._render();
+    });
+    on(".key", (el) => {
+      this._swKey = el.dataset.sw;
+      this._pos = Number(el.dataset.pos);
+      this._render();
+    });
+    on("[data-mode]", (el) => {
+      this._mode = el.dataset.mode;
+      this._render();
+    });
+    const other = root.getElementById("otherroom");
+    if (other) other.addEventListener("change", () => ((this._otherRoom = Number(other.value)), this._render()));
+    const curBtn = () => {
+      const sw = this._switches().find((x) => x.key === this._swKey);
+      return sw ? sw.keys[this._pos] ?? sw.keys[1] : null;
+    };
+    on(".chip[data-t]:not([disabled])", (el) => {
+      const c = Number(el.dataset.c);
+      this._toggleAct(curBtn(), Number(el.dataset.t), el.dataset.l === "1", c, c === 4 ? 100 : c === 5 ? 25 : 0);
+    });
+    root.querySelectorAll("input.pct").forEach((el) =>
+      el.addEventListener("change", () =>
+        this._toggleAct(curBtn(), Number(el.dataset.t), el.dataset.l === "1", Number(el.dataset.c), Math.max(0, Math.min(100, Number(el.value) || 0)), true)
+      )
+    );
+    on("button[data-corr]:not([disabled])", (el) => {
+      const t = this._info.temps.find((x) => x.idx === Number(el.dataset.corr));
+      if (t) this._stepCorr(t, Number(el.dataset.d));
+    });
+    root.querySelectorAll("input[data-par]").forEach((el) =>
+      el.addEventListener("change", () => {
+        const p = this._info.params.find((x) => x.p === Number(el.dataset.par));
+        if (p) this._saveParam(p, el.value);
+      })
+    );
+    on("button[data-restore]:not([disabled])", (el) => this._restore(el.dataset.restore));
+    on("button[data-exportver]", (el) => this._exportVersion(this._version(el.dataset.exportver)));
+    on("button[data-del]", (el) => this._delete(el.dataset.del));
+    on("#exportcur", () => this._exportVersion(null));
+    on("#savever", () => this._saveVersion());
+    on("#reload", () => this._readPlc());
+    const fileIn = root.getElementById("importfile");
+    on("#importbtn", () => fileIn && fileIn.click());
+    if (fileIn) fileIn.addEventListener("change", () => fileIn.files[0] && this._import(fileIn.files[0]));
+    const es = root.getElementById("entry");
+    if (es) es.addEventListener("change", () => this._selectEntry(es.value));
+    if (this._dialog) {
+      const input = root.getElementById("dlg-input");
+      const okVal = () => (this._dialog.input !== null ? input.value : true);
+      on("#dlg-ok", () => this._closeDialog(okVal()));
+      on("#dlg-cancel", () => this._closeDialog(this._dialog.input !== null ? null : false));
+      const bg = root.getElementById("dlg-bg");
+      bg.addEventListener("click", (ev) => {
+        if (ev.target === bg) this._closeDialog(this._dialog.input !== null ? null : false);
+      });
+      if (input)
+        input.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") this._closeDialog(input.value);
+          if (ev.key === "Escape") this._closeDialog(null);
+        });
+    }
   }
 
   _code(c, b) {
@@ -678,6 +940,10 @@ class TecomatPlcPanel extends HTMLElement {
   }
 
   _render() {
+    if (this._info && this._v2()) {
+      this._renderV2();
+      return;
+    }
     const info = this._info;
     const ready = !!(info && this._cfg && !this._busy);
     const fmtT = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
@@ -692,9 +958,6 @@ class TecomatPlcPanel extends HTMLElement {
     let left = "";
     let right = `<div class="card"><div class="card-header">${icon("mdi:light-switch")}Načítám…</div>${this._alerts()}</div>`;
 
-    if (info && this._v2()) {
-      [left, right] = this._layoutV2(ready);
-    }
     if (info && !this._v2()) {
       // tlačítka
       const byGroup = {};
@@ -768,23 +1031,17 @@ class TecomatPlcPanel extends HTMLElement {
               })
               .join("")
           : "";
-      const body = this._v2()
-        ? this._cfg && btn
-          ? this._renderActions(btn, ready)
-          : ""
-        : rows
-          ? `<div class="scroll"><table><tr><th class="left">Okruh</th>${head}</tr>${rows}</table></div>`
-          : "";
+      const body = rows ? `<div class="scroll"><table><tr><th class="left">Okruh</th>${head}</tr>${rows}</table></div>` : "";
       right = `
         <div class="card">
           <div class="card-header">${icon("mdi:lightbulb-group")}
-            <div style="display:flex;flex-direction:column">${this._v2() ? "Akce tlačítka" : "Osvětlení"}
+            <div style="display:flex;flex-direction:column">Osvětlení
               <span class="sub">${btn ? `${esc(this._groupName(btn.group))} · ${esc(btn.name)}` : "Vyberte tlačítko"}</span>
             </div>
           </div>
           ${this._alerts()}
           ${body}
-          <div class="note">${this._v2() ? "Až 4 akce na krátký a 4 na dlouhý stisk. Víc akcí „Přepni“ na jednom stisku funguje jako skupina: když svítí aspoň jedno, vše zhasne, jinak se vše rozsvítí. Změny se zapíšou tlačítkem Zapsat do PLC." : "Změna se zapíše do PLC okamžitě."} Konfigurace je uložená v PLC a tlačítka podle ní fungují i bez Home Assistant.</div>
+          <div class="note">Změna se zapíše do PLC okamžitě. Konfigurace je uložená v PLC a tlačítka podle ní fungují i bez Home Assistant.</div>
         </div>`;
 
       // verze
@@ -817,7 +1074,6 @@ class TecomatPlcPanel extends HTMLElement {
     } else if (!info && this._error) {
       right = `<div class="card"><div class="card-header">${icon("mdi:alert-circle")}Tecomat PLC</div>${this._alerts()}</div>`;
     }
-    if (info && this._v2()) right += this._versionsCard(ready);
 
     const dlg = this._dialog
       ? `<div class="backdrop" id="dlg-bg"><div class="dialog" role="dialog">
@@ -851,32 +1107,13 @@ class TecomatPlcPanel extends HTMLElement {
       mb.narrow = this._narrow;
     }
     const on = (sel, fn) => root.querySelectorAll(sel).forEach((el) => el.addEventListener("click", () => fn(el)));
-    on(".item[data-room]", (el) => {
-      this._room = Number(el.dataset.room);
-      const first = this._info.buttons2.find((b) => b.group === this._room);
-      this._sel = first ? first.b : null;
-      this._draft = null;
-      this._render();
-    });
     on(".item[data-b]", (el) => {
       this._sel = Number(el.dataset.b);
-      this._draft = null;
       this._render();
     });
     on(".chip:not([disabled])", (el) =>
       this._toggleOpt(Number(el.dataset.c), this._sel, el.dataset.g, Number(el.dataset.v))
     );
-    root.querySelectorAll("select.act").forEach((el) =>
-      el.addEventListener("change", () => this._editAct(this._sel, Number(el.dataset.a), el.dataset.f, el.value))
-    );
-    root.querySelectorAll("input.actval").forEach((el) =>
-      el.addEventListener("change", () => this._editAct(this._sel, Number(el.dataset.a), "val", el.value))
-    );
-    on("#actsave", () => this._saveActions(this._sel));
-    on("#actcancel", () => {
-      this._draft = null;
-      this._render();
-    });
     on("button[data-par]", (el) => {
       const p = this._info.params.find((x) => x.p === Number(el.dataset.par));
       if (p) this._saveParam(p, root.getElementById(`par-${p.p}`).value);

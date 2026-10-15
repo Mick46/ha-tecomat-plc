@@ -74,12 +74,21 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
         ],
         "buttons": [{"m": o.p1, "uid": o.uid, "name": o.name, "group": o.group} for o in coord.matrix_buttons()],
         "temps": [
-            {"idx": o.p1, "uid": o.uid, "name": o.name, "group": o.group, "addr": o.addr}
+            {"idx": o.p1, "uid": o.uid, "name": o.name, "group": o.group, "addr": o.addr, "sw": o.p2 if d.protocol >= 2 else 0}
             for o in d.objects_of(T_TEMP)
         ],
         "protocol": d.protocol,
         "buttons2": [
-            {"b": i, "uid": o.uid, "name": o.name, "group": o.group} for i, o in enumerate(coord.buttons_v2())
+            {
+                "b": i,
+                "uid": o.uid,
+                "name": o.name,
+                "group": o.group,
+                "sw": o.p1,  # číslo vypínače (0 = tlačítko na vstupu)
+                "pos": o.p2,  # klapka: 1 UP1, 2 DOWN1, 3 UP2, 4 DOWN2
+                "swtype": o.p3 or 1,  # 2 = WSB2-20, 4 = WSB2-40, 1 = vstup
+            }
+            for i, o in enumerate(coord.buttons_v2())
         ]
         if d.protocol >= 2
         else [],
@@ -105,6 +114,9 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
                 "max": o.p2 - 65536 if o.p2 > 32767 else o.p2,
                 "dec": o.flags & 7,
                 "unit": UNIT_LABELS.get(o.flags >> 8, ""),
+                # generátor: UID parametru = 30000 + UID objektu·5 + druh (1 max. doba, 2 max. jas, 3 náběh)
+                "target": (o.uid - 30000) // 5 if o.uid > 30000 else 0,
+                "kind": (o.uid - 30000) % 5 if o.uid > 30000 else 0,
             }
             for o in d.objects_of(T_NUMBER)
         ]
