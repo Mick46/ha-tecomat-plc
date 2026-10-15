@@ -10,10 +10,24 @@ from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 
-from .const import DOMAIN, SUBTYPES, T_DIMMER, T_NUMBER, T_TEMP
+from .const import (
+    DOMAIN,
+    F_VALUE_SET,
+    SUBTYPES,
+    T_BINARY,
+    T_COVER,
+    T_DIMMER,
+    T_GATE,
+    T_NUMBER,
+    T_SWITCH,
+    T_TEMP,
+    T_VALUE,
+    UNIT_BOOL,
+)
 from .sensor import UNITS
 
 UNIT_LABELS = {k: str(v) for k, v in UNITS.items()}
+TECH_SUBTYPES = (7, 8, 9, 10)
 from .modbus_client import ModbusError
 
 
@@ -57,6 +71,25 @@ def ws_entries(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], out)
 
 
+def _targets(coord) -> list[dict]:
+    """Cíle akcí tlačítek: výstupy, stmívače, žaluzie (nahoru i dolů zvlášť) a vrata."""
+    out = []
+    for o in coord.targets_v2():
+        if o.type == T_SWITCH and o.p2 in TECH_SUBTYPES:
+            continue  # kotel, TUV, napájení hlavic, topné okruhy řídí logika topení, ne tlačítka
+        base = {"name": o.name, "group": o.group, "dimmer": o.type == T_DIMMER}
+        if o.type == T_COVER:
+            sub = "Žaluzie" if o.flags & 1 else "Markýza"
+            out.append({**base, "uid": o.uid, "kind": "cover", "sub": sub, "name": f"{o.name} nahoru", "obj": o.uid})
+            out.append({**base, "uid": o.p1, "kind": "cover", "sub": sub, "name": f"{o.name} dolů", "obj": o.uid})
+        elif o.type == T_GATE:
+            out.append({**base, "uid": o.uid, "kind": "gate", "sub": "Vrata", "obj": o.uid})
+        else:
+            sub = SUBTYPES.get(o.p2, "Světlo" if o.type != 2 else "Spínač")
+            out.append({**base, "uid": o.uid, "kind": "dimmer" if o.type == T_DIMMER else "output", "sub": sub, "obj": o.uid})
+    return out
+
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/info", vol.Required("entry_id"): str})
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -92,18 +125,18 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
         ]
         if d.protocol >= 2
         else [],
-        "targets": [
-            {
-                "uid": o.uid,
-                "name": o.name,
-                "group": o.group,
-                "dimmer": o.type == T_DIMMER,
-                "sub": SUBTYPES.get(o.p2, "Světlo" if o.type != 2 else "Spínač"),
-            }
-            for o in coord.targets_v2()
+        "targets": _targets(coord) if d.protocol >= 2 else [],
+        "sensors": [
+            {"uid": o.uid, "name": o.name, "group": o.group}
+            for o in d.objects_of(T_BINARY)
         ]
         if d.protocol >= 2
         else [],
+        "autos": [{"a": i, "name": n} for i, n in enumerate(d.autos)],
+        "meters": [
+            {"i": i, "uid": o.uid, "name": o.name, "group": o.group, "addr": o.addr, "dec": o.p1}
+            for i, o in enumerate(x for x in d.objects_of(T_VALUE) if x.flags & F_VALUE_SET)
+        ],
         "params": [
             {
                 "p": o.p3,
@@ -114,6 +147,7 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
                 "max": o.p2 - 65536 if o.p2 > 32767 else o.p2,
                 "dec": o.flags & 7,
                 "unit": UNIT_LABELS.get(o.flags >> 8, ""),
+                "bool": (o.flags >> 8) == UNIT_BOOL,
                 # generátor: UID parametru = 30000 + UID objektu·5 + druh (1 max. doba, 2 max. jas, 3 náběh)
                 "target": (o.uid - 30000) // 5 if o.uid > 30000 else 0,
                 "kind": (o.uid - 30000) % 5 if o.uid > 30000 else 0,
@@ -138,6 +172,12 @@ async def ws_config_get(hass, coord, msg) -> dict[str, Any]:
             "cor": coord.get_signed(o.addr + 1),
         }
     cfg["temps"] = temps
+    vals = [o for o in coord.desc.objects_of(T_VALUE)]
+    cfg["meters"] = {
+        str(i): coord.get_value(o.addr, o.flags) for i, o in enumerate(x for x in vals if x.flags & F_VALUE_SET)
+    }
+    lux = next((o for o in vals if o.p3 == 7), None)  # třída illuminance
+    cfg["lux"] = coord.get_value(lux.addr, lux.flags) if lux else None
     return cfg
 
 

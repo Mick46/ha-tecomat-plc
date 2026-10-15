@@ -401,9 +401,10 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         info = (await ws.receive_json())["result"]
         assert info["protocol"] == 2 and info["buttons"] == [] and info["circuits"] == []
         assert [b["uid"] for b in info["buttons2"]] == [2091, 203]
-        assert {t["uid"]: t["dimmer"] for t in info["targets"]} == {20: False, 2: True}
-        assert {t["uid"]: t["sub"] for t in info["targets"]} == {20: "Světlo", 2: "Stmívač"}
-        assert [(p["p"], p["unit"], p["dec"]) for p in info["params"]] == [(0, "min", 0), (1, "s", 1)]
+        tg = {t["uid"]: t for t in info["targets"]}
+        assert tg[20]["dimmer"] is False and tg[2]["dimmer"] is True
+        assert tg[20]["sub"] == "Světlo" and tg[2]["sub"] == "Stmívač"
+        assert [(p["p"], p["unit"], p["dec"]) for p in info["params"]][:2] == [(0, "min", 0), (1, "s", 1)]
         # parametr bez příznaku „entita“ je jen v panelu, korekce teplot v protokolu 2 také
         assert ent.async_get_entity_id("number", DOMAIN, f"{entry.entry_id}_30101") is None
         assert ent.async_get_entity_id("number", DOMAIN, f"{entry.entry_id}_402_corr") is None
@@ -428,6 +429,39 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         await ws.send_json({"id": 6, "type": f"{DOMAIN}/versions/restore", "entry_id": entry.entry_id, "version_id": ver["id"]})
         assert (await ws.receive_json())["success"]
         assert plc.box[16] == 20 and plc.box[20001] == 35
+        # žaluzie a vrata
+        cov = ent.async_get_entity_id("cover", DOMAIN, f"{entry.entry_id}_5701")
+        await hass.services.async_call("cover", "set_cover_position", {"entity_id": cov, "position": 40}, blocking=True)
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(cov).attributes["current_position"] == 40
+        gate = ent.async_get_entity_id("cover", DOMAIN, f"{entry.entry_id}_226")
+        assert hass.states.get(gate).state == "closed"
+        imp = ent.async_get_entity_id("button", DOMAIN, f"{entry.entry_id}_226_impulse")
+        await hass.services.async_call("button", "press", {"entity_id": imp}, blocking=True)
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(gate).state == "open"
+
+        # panel: žaluzie nahoru/dolů jako cíle, vrata, čidla, automatika, plynoměr, parametr ano/ne
+        await ws.send_json({"id": 7, "type": f"{DOMAIN}/info", "entry_id": entry.entry_id})
+        info = (await ws.receive_json())["result"]
+        kinds = {t["uid"]: t["kind"] for t in info["targets"]}
+        assert kinds[5701] == "cover" and kinds[5702] == "cover" and kinds[226] == "gate"
+        assert [x["uid"] for x in info["sensors"]] == [216]
+        assert info["autos"] == [{"a": 0, "name": "PIR vstup"}]
+        assert info["meters"][0]["uid"] == 241
+        assert [p["bool"] for p in info["params"]] == [False, False, True]
+        await ws.send_json({"id": 8, "type": f"{DOMAIN}/config/get", "entry_id": entry.entry_id})
+        cfg = (await ws.receive_json())["result"]
+        assert cfg["map"]["4001"] == 216 and cfg["map"]["4016"] == 20
+        assert cfg["meters"]["0"] == 1192265
+        assert cfg["checksum_plc"] == cfg["checksum_calc"]
+        # nastavení plynoměru přes schránku
+        await ws.send_json({"id": 9, "type": f"{DOMAIN}/config/set", "entry_id": entry.entry_id,
+                            "pairs": [[9000, 1250000 % 65536], [9001, 1250000 // 65536]]})
+        assert (await ws.receive_json())["success"]
+        assert plc.gas == 1250000
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await plc.stop()

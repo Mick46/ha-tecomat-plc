@@ -108,9 +108,11 @@ Program PLC vytvořený generátorem z popisu domu. Integrace podporuje obě ver
 | Typ | Entita | Data | Parametry |
 |---|---|---|---|
 | 7 DIMMER | `light` s jasem | +0 žádaný jas 0–100 (zápis), +1 skutečný jas | – |
+| 8 COVER | `cover` (žaluzie / markýza) | +0 povel (1 otevřít, 2 zavřít, 3 stop, 4 na polohu), +1 cílová poloha, +2 poloha 0–100, +3 lamely, +4 pohyb | p1 = UID výstupu dolů, flags bit0 = lamely |
+| 9 GATE | `cover` (garáž) + `button` Impulz | +0 povel (1 otevřít, 2 zavřít, 3 impulz), +1 stav (1 otevřeno) | – |
 | 10 NUMBER | `number` (konfigurace) | +0 hodnota (INT) | p1 min, p2 max, p3 index parametru; flags bity 0–2 desetinná místa, 8–15 jednotka |
 
-- **Konfigurace přes schránku a čtecí okno** (jedna hodnota na registr): `0..` akce tlačítek (16 registrů na tlačítko = 8 akcí: 0–3 krátký, 4–7 dlouhý stisk; akce = UID cíle, povel·256 + hodnota; povely 1 přepni, 2 zapni, 3 vypni, 4 jas = hodnota %, 5 jas + hodnota %), `10000..` korekce teplot, `20000..` parametry. Kontrolní součet = Σ hodnota·(index mod 251 + 1) mod 65536.
+- **Konfigurace přes schránku a čtecí okno** (jedna hodnota na registr): `0..` akce tlačítek (16 registrů na tlačítko = 8 akcí: 0–3 krátký, 4–7 dlouhý stisk; akce = UID cíle, povel·256 + hodnota; povely 1 přepni, 2 zapni, 3 vypni, 4 jas = hodnota %, 5 jas + hodnota %), `10000..` korekce teplot, `4000..` automatiky (20 registrů na automatiku: aktivní, 4 čidla, sepnutí/rozepnutí, doba s, soumrak lx, 4 okna od/do v minutách, výstup, jas), `9000/9001` stav čítače (VALUE s flags bit2), `20000..` parametry. Hlavička 20 = počet automatik, 21 = index prvního názvu automatiky. Kontrolní součet = Σ hodnota·(index mod 251 + 1) mod 65536.
 - Nastavení ukládá PLC podle UID, takže přežije přegenerování programu.
 
 ## Vývoj a testy

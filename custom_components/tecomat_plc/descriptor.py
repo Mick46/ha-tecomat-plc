@@ -9,6 +9,8 @@ from .const import (
     DESC_BASES,
     DESC_MAGIC,
     H_AREA_OFS,
+    H_AUTO_NAME_OFS,
+    H_AUTOS,
     H_GROUPS,
     H_MAGIC,
     H_MAILBOX_BASE,
@@ -64,6 +66,7 @@ class Descriptor:
     mailbox_base: int
     window_base: int
     groups: list[PlcGroup] = field(default_factory=list)
+    autos: list[str] = field(default_factory=list)  # protokol 2: názvy automatik
     objects: list[PlcObject] = field(default_factory=list)
 
     @property
@@ -135,7 +138,9 @@ async def read_descriptor(client) -> Descriptor:
     swap, sstride, sofs = _detect_strings(tst)
     obj_ofs = hdr[H_OBJ_NAME_OFS] or 64
     area_ofs = hdr[H_AREA_OFS] or 32
-    n_strs = obj_ofs + n_obj
+    n_autos = hdr[H_AUTOS] if hdr[H_PROTOCOL] >= 2 else 0
+    auto_ofs = hdr[H_AUTO_NAME_OFS] if n_autos else 0
+    n_strs = max(obj_ofs + n_obj, auto_ofs + n_autos)
     nbytes = n_strs * sstride + sofs
     sregs = await client.read_many(hdr[H_STRS_BASE], (nbytes + 1) // 2)
     sraw = _regs_to_bytes(sregs, swap)
@@ -146,6 +151,8 @@ async def read_descriptor(client) -> Descriptor:
 
     for g in range(n_groups):
         desc.groups.append(PlcGroup(g, s(g) or f"Skupina {g}", s(area_ofs + g)))
+
+    desc.autos = [s(auto_ofs + i) or f"Automatika {i + 1}" for i in range(n_autos)]
 
     meta = await client.read_many(hdr[H_META_BASE], n_obj * stride) if n_obj else []
     for i in range(n_obj):

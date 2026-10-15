@@ -37,6 +37,8 @@ H_STRS_COUNT = 14
 H_TST_BASE = 15
 H_OBJ_NAME_OFS = 16
 H_AREA_OFS = 17
+H_AUTOS = 20          # protokol 2: počet automatik
+H_AUTO_NAME_OFS = 21  # protokol 2: index prvního názvu automatiky v řetězcích
 
 # Stavový blok (offset od status base)
 S_HB_IN = 0        # HA -> PLC heartbeat
@@ -56,8 +58,15 @@ T_BINARY = 5
 T_VALUE = 6   # měřená hodnota: p1 desetinná místa, p2 jednotka, p3 třída; flags bit0 = 32 bit (addr = vyšší slovo), bit1 = bez znaménka
 
 T_DIMMER = 7  # stmívač: +0 žádaný jas 0–100 (zápis z HA), +1 skutečný jas
+T_COVER = 8   # žaluzie/markýza: +0 povel (1 otevřít, 2 zavřít, 3 stop, 4 na polohu), +1 cílová poloha, +2 poloha, +3 lamely, +4 pohyb; p1 UID výstupu dolů; flags bit0 = lamely
+T_GATE = 9    # vrata: +0 povel (1 otevřít, 2 zavřít, 3 impulz), +1 stav (1 otevřeno)
 T_NUMBER = 10 # parametr v PLC: +0 hodnota; p1 min, p2 max, p3 index (schránka 20000+p3); flags bity 0–2 desetinná místa, 8–15 jednotka
 
+F_VALUE_SET = 0x04     # VALUE: čítač nastavitelný z panelu (schránka 9000 + 2·i nižší, +1 vyšší slovo)
+AUTO_INDEX_BASE = 4000
+AUTO_REGS = 20
+GAS_INDEX_BASE = 9000
+UNIT_BOOL = 11
 F_PARAM_ENTITY = 0x10  # NUMBER: zobrazit jako entitu (jinak jen v panelu)
 
 # podtyp výstupu (protokol 2, meta p2 u LIGHT/SWITCH/DIMMER)
@@ -93,4 +102,4 @@ STATIC_URL = "/tecomat_plc_static"
 
 BUTTON_EVENTS = {1: "short", 2: "long", 3: "double"}
 
-PLATFORMS = ["binary_sensor", "event", "light", "number", "sensor", "switch"]
+PLATFORMS = ["binary_sensor", "button", "cover", "event", "light", "number", "sensor", "switch"]

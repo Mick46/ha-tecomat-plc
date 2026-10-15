@@ -15,6 +15,8 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    AUTO_INDEX_BASE,
+    AUTO_REGS,
     BTN_SLOTS,
     CORR_INDEX_BASE,
     DOMAIN,
@@ -33,6 +35,8 @@ from .const import (
     STATUS_LEN,
     T_BINARY,
     T_BUTTON,
+    T_COVER,
+    T_GATE,
     T_DIMMER,
     T_LIGHT,
     T_NUMBER,
@@ -134,6 +138,10 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
             elif o.type == T_TEMP:
                 addrs.update((o.addr, o.addr + 1, o.addr + 2))
             elif o.type == T_DIMMER:
+                addrs.update((o.addr, o.addr + 1))
+            elif o.type == T_COVER:
+                addrs.update(range(o.addr, o.addr + 5))
+            elif o.type == T_GATE:
                 addrs.update((o.addr, o.addr + 1))
             elif o.type == T_NUMBER:
                 addrs.add(o.addr)
@@ -267,7 +275,7 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         return self.desc.objects_of(T_BUTTON)
 
     def targets_v2(self):
-        return self.desc.objects_of(T_LIGHT, T_SWITCH, T_DIMMER)
+        return self.desc.objects_of(T_LIGHT, T_SWITCH, T_DIMMER, T_COVER, T_GATE)
 
     def config_ranges_v2(self) -> list[tuple[int, int]]:
         """Oblasti konfigurace (začátek, počet) pro čtecí okno a zálohy."""
@@ -275,6 +283,8 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         nb = len(self.buttons_v2())
         if nb:
             ranges.append((0, nb * BTN_SLOTS))
+        if self.desc.autos:
+            ranges.append((AUTO_INDEX_BASE, len(self.desc.autos) * AUTO_REGS))
         params = self.desc.objects_of(T_NUMBER)
         if params:
             ranges.append((PARAM_INDEX_BASE, max(o.p3 for o in params) + 1))

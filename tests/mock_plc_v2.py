@@ -30,7 +30,13 @@ OBJECTS2 = [
     (3, 2, 30307, 0, 0, 0, 0, 203, "Levé"),              # tlačítko b = 1
     (10, 1, 30308, 0, 1440, 0, 10 << 8, 30101, "Bodovky max. doba"),       # parametr 0, min
     (10, 1, 30309, 0, 600, 1, 1 | (9 << 8) | 0x10, 30013, "Pod linkou náběh"),    # parametr 1, 0,1 s, i jako entita
+    (8, 2, 30310, 5702, 0, 0, 1, 5701, "Žaluzie"),        # žaluzie: +0 povel, +1 cíl, +2 poloha, +3 lamely, +4 pohyb
+    (9, 2, 30315, 0, 0, 0, 0, 226, "Vrata"),              # vrata: +0 povel, +1 stav
+    (5, 2, 30317, 0, 6, 0, 0, 216, "Vchod"),              # pohyb
+    (6, 2, 30318, 2, 8, 8, 1 | 2 | 4, 241, "Plyn"),       # plynoměr (32 bit, nastavitelný)
+    (10, 2, 30320, 0, 1, 2, 11 << 8, 40455, "Levý signalizace vrat"),  # parametr ano/ne (bez objektu)
 ]
+AUTO_NAMES = ["PIR vstup"]
 
 
 class MockPlcV2(MockPlc):
@@ -40,8 +46,9 @@ class MockPlcV2(MockPlc):
 
     def _build(self, prog_version: int) -> None:
         hdr = [0] * 32
-        hdr[0:20] = [0x5443, 2, self.plc_type, prog_version, len(GROUPS2), len(self.objects), 2, 8,
-                     STATUS, MAILBOX, WINDOW, META, 8, STRS, OBJ_OFS + 400, TST, OBJ_OFS, AREA_OFS, 1, 2]
+        hdr[0:22] = [0x5443, 2, self.plc_type, prog_version, len(GROUPS2), len(self.objects), 2, 8,
+                     STATUS, MAILBOX, WINDOW, META, 8, STRS, OBJ_OFS + 400, TST, OBJ_OFS, AREA_OFS, 1, 3,
+                     len(AUTO_NAMES), OBJ_OFS + len(self.objects)]
         for i, v in enumerate(hdr):
             self.reg[DESC + i] = v
         self._put_string(TST, 0, "TECO")
@@ -53,10 +60,19 @@ class MockPlcV2(MockPlc):
             for k, v in enumerate(o[:8]):
                 self.reg[META + i * 8 + k] = v
             self._put_string(STRS, OBJ_OFS + i, o[8])
+        for i, n in enumerate(AUTO_NAMES):
+            self._put_string(STRS, OBJ_OFS + len(self.objects) + i, n)
         # výchozí konfigurace: tlačítko 0 krátce přepne bodovky, dlouze stmívač na 50 %
         self.box.update({0: 20, 1: 1 * 256, 8: 2, 9: 4 * 256 + 50})
         self.box[20000] = 0
         self.box[20001] = 20
+        self.box[20002] = 1
+        self.box.update({4000: 1, 4001: 216, 4006: 20, 4007: 400, 4016: 20})
+        for r in range(8, 16):
+            self.box[4000 + r] = 0xFFFF
+        self.gas = 1192265
+        self.cover_pos = 100
+        self.gate_open = 0
         self.raw_temp = 223
         self.cycle()
 
@@ -91,4 +107,24 @@ class MockPlcV2(MockPlc):
         # parametry
         r[30308] = self.box.get(20000, 0)
         r[30309] = self.box.get(20001, 0)
+        r[30320] = self.box.get(20002, 0)
+        # plynoměr: 9000 nižší, 9001 vyšší slovo (nastaví se zápisem 9001)
+        if 9001 in self.box:
+            self.gas = self.box.pop(9001) * 65536 + self.box.pop(9000, 0)
+        r[30318], r[30319] = self.gas >> 16, self.gas & 0xFFFF
+        # žaluzie: povel se hned provede
+        cmd = r.get(30310, 0)
+        if cmd == 1:
+            self.cover_pos = 100
+        elif cmd == 2:
+            self.cover_pos = 0
+        elif cmd == 4:
+            self.cover_pos = r.get(30311, 0)
+        r[30310] = 0
+        r[30312], r[30313], r[30314] = self.cover_pos, 100, 0
+        # vrata: impulz přepne stav
+        if r.get(30315, 0) in (1, 2, 3):
+            self.gate_open = {1: 1, 2: 0, 3: 1 - self.gate_open}[r[30315]]
+        r[30315] = 0
+        r[30316] = self.gate_open
         r[STATUS + 4] = 1 if r.get(STATUS + 0, 0) else 0

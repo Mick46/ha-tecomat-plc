@@ -225,6 +225,26 @@ const STYLE_V2 = `
   input.num { width: 80px; height: 34px; }
   .unit { margin-left: 4px; font-size: 12px; color: var(--secondary-text-color); }
   td.bigtd { font-size: 18px; }
+  .title2 { margin-left: 12px; white-space: nowrap; }
+  .tabs { margin-left: 16px; }
+  .status { display: flex; align-items: center; gap: 6px; cursor: pointer; margin-right: 4px; }
+  .st { display: inline-flex; align-items: center; gap: 2px; }
+  .st small { font-size: 12px; }
+  .st.ok ha-icon { color: var(--success-color, #43a047); }
+  .st.warn ha-icon { color: var(--warning-color, #ffa600); }
+  .st.bad ha-icon { color: var(--error-color, #db4437); }
+  td.pfs { text-align: left; }
+  .pf { display: inline-flex; align-items: center; gap: 6px; margin: 2px 16px 2px 0; white-space: nowrap; }
+  .pf span:first-child { color: var(--secondary-text-color); font-size: 13px; }
+  input.num.wide { width: 120px; }
+  .form { display: flex; flex-direction: column; gap: 10px; padding: 4px 16px 12px; }
+  .form .row { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 12px; }
+  .form .row > span:first-child { color: var(--secondary-text-color); }
+  .form select, .form input[type=time] { height: 36px; border-radius: 8px; border: 1px solid var(--divider-color); padding: 0 8px; font: inherit;
+    background: var(--secondary-background-color); color: var(--primary-text-color); max-width: 100%; }
+  .form .row input[type=checkbox] { justify-self: start; width: 20px; height: 20px; }
+  .col2 { display: flex; flex-direction: column; gap: 6px; }
+  .win { display: flex; align-items: center; gap: 6px; }
   .vers { max-width: 900px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
 `;
 
@@ -252,6 +272,8 @@ class TecomatPlcPanel extends HTMLElement {
     this._mode = "room";
     this._otherRoom = null;
     this._setRoom = null;
+    this._auto = null;
+    this._autoDraft = null;
   }
 
   set hass(h) {
@@ -531,7 +553,7 @@ class TecomatPlcPanel extends HTMLElement {
             <div class="swrow">${this._drawSwitch(x)}${t ? this._tempBox(t, ready) : ""}</div></div>`;
         })
         .join("")}</div>`;
-    let right = `<div class="card"><div class="card-header">${icon("mdi:gesture-tap-button")}Akce</div>${this._alerts()}<div class="empty">Vyberte ovladač.</div></div>`;
+    let right = `<div class="card"><div class="card-header">${icon("mdi:gesture-tap-button")}Akce</div>${this._alerts(false)}<div class="empty">Vyberte ovladač.</div></div>`;
     if (sw && this._cfg) {
       const b = sw.keys[this._pos] ?? sw.keys[1];
       const keyName = sw.type === 1 ? "tlačítko" : sw.type === 2 ? (this._pos === 1 ? "klapka UP" : "klapka DOWN")
@@ -547,6 +569,11 @@ class TecomatPlcPanel extends HTMLElement {
         const cmd = a ? a.cmd : 0;
         const dis = ready ? "" : "disabled";
         const L = long ? 1 : 0;
+        if (t.kind === "cover" || t.kind === "gate") {
+          const c = t.kind === "cover" ? 6 : 7;
+          const l = t.kind === "cover" ? (long ? "Do konce" : "Krok / stop") : "Impulz";
+          return `<td colspan="3"><button class="chip ${cmd === c ? "on" : ""}" data-t="${t.uid}" data-l="${L}" data-c="${c}" ${dis}>${l}</button></td><td></td>`;
+        }
         let h = [[1, "Přepni"], [3, "Vypni"], [2, "Zapni"]]
           .map(([c, l]) => `<td><button class="chip ${cmd === c ? "on" : ""}" data-t="${t.uid}" data-l="${L}" data-c="${c}" ${dis}>${l}</button></td>`)
           .join("");
@@ -557,7 +584,7 @@ class TecomatPlcPanel extends HTMLElement {
       };
       right = `<div class="card">
         <div class="card-header">${icon("mdi:gesture-tap-button")}<div style="display:flex;flex-direction:column">${esc(this._groupName(sw.group))} · ${esc(sw.name)}<span class="sub">${esc(keyName)}</span></div></div>
-        ${this._alerts()}
+        ${this._alerts(false)}
         <div class="counters"><span class="${sN >= 4 ? "full" : ""}">Krátký stisk <b>${sN}/4</b></span><span class="${lN >= 4 ? "full" : ""}">Dlouhý stisk <b>${lN}/4</b></span></div>
         <div class="filters">
           <div class="seg">${[["room", "Místnost"], ["all", "Vše"], ["sel", "Vybrané"]].map(([m, l]) => `<button data-mode="${m}" class="${this._mode === m ? "on" : ""}">${l}</button>`).join("")}</div>
@@ -576,25 +603,45 @@ class TecomatPlcPanel extends HTMLElement {
   _tabSet(ready) {
     const info = this._info;
     const params = info.params || [];
-    const byTarget = {};
-    for (const p of params) (byTarget[p.target] ||= {})[p.kind] = p;
-    const objs = info.targets.filter((t) => byTarget[t.uid]);
+    const objByUid = {};
+    for (const t of info.targets) if (t.obj === t.uid) objByUid[t.uid] = t;
+    // parametry podle objektu; bez objektu (např. signalizace na vypínači) zvlášť
+    const rows = {};
+    const loose = [];
+    for (const p of params) {
+      const t = objByUid[p.target];
+      if (t) (rows[t.uid] ||= { t, ps: [] }).ps.push(p);
+      else loose.push(p);
+    }
+    const meters = info.meters || [];
     const cnt = {};
-    for (const t of objs) cnt[t.group] = (cnt[t.group] || 0) + 1;
-    for (const t of info.temps) cnt[t.group] = (cnt[t.group] || 0) + 1;
+    const add = (g) => (cnt[g] = (cnt[g] || 0) + 1);
+    Object.values(rows).forEach((r) => add(r.t.group));
+    loose.forEach((p) => add(p.group));
+    info.temps.forEach((t) => add(t.group));
+    meters.forEach((m) => add(m.group));
     const rooms = info.groups.filter((g) => cnt[g.id]);
     if (this._setRoom === null || !cnt[this._setRoom]) this._setRoom = rooms.length ? rooms[0].id : null;
-    const COLS = [[1, "Max. doba"], [2, "Max. jas"], [3, "Náběh"]];
-    const mine = objs.filter((t) => t.group === this._setRoom);
-    const cols = COLS.filter(([k]) => mine.some((t) => byTarget[t.uid][k]));
     const dis = ready ? "" : "disabled";
-    const rows = mine
-      .map((t) => `<tr><td class="left">${esc(t.sub)} · ${esc(t.name)}</td>${cols
-        .map(([k]) => {
-          const p = byTarget[t.uid][k];
-          return `<td>${p ? `<input class="num" data-par="${p.p}" type="number" step="${1 / 10 ** p.dec}" min="${p.min / 10 ** p.dec}" max="${p.max / 10 ** p.dec}" value="${this._cfg ? this._paramValue(p) : ""}" ${dis}><span class="unit">${esc(p.unit)}</span>` : ""}</td>`;
-        })
-        .join("")}</tr>`)
+    const label = (p, t) => {
+      const n = t && p.name.startsWith(t.name + " ") ? p.name.slice(t.name.length + 1) : p.name;
+      return n.charAt(0).toUpperCase() + n.slice(1);
+    };
+    const field = (p, t) => {
+      if (p.bool) {
+        const on = this._cfg && this._paramValue(p) !== 0;
+        return `<label class="pf"><input type="checkbox" data-parb="${p.p}" ${on ? "checked" : ""} ${dis}> ${esc(label(p, t))}</label>`;
+      }
+      return `<label class="pf"><span>${esc(label(p, t))}</span><input class="num" data-par="${p.p}" type="number" step="${1 / 10 ** p.dec}"
+        min="${p.min / 10 ** p.dec}" max="${p.max / 10 ** p.dec}" value="${this._cfg ? this._paramValue(p) : ""}" ${dis}><span class="unit">${esc(p.unit)}</span></label>`;
+    };
+    const mine = Object.values(rows).filter((r) => r.t.group === this._setRoom);
+    const objRows = mine
+      .map((r) => `<tr><td class="left">${esc(r.t.sub)} · ${esc(r.t.name)}</td><td class="pfs">${r.ps.map((p) => field(p, r.t)).join("")}</td></tr>`)
+      .join("");
+    const looseRows = loose
+      .filter((p) => p.group === this._setRoom)
+      .map((p) => `<tr><td class="left" colspan="2">${field(p, null)}</td></tr>`)
       .join("");
     const temps = info.temps.filter((t) => t.group === this._setRoom);
     const f = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
@@ -607,21 +654,118 @@ class TecomatPlcPanel extends HTMLElement {
           <td class="bigtd">${f(tv.cor)}</td></tr>`;
       })
       .join("");
+    const mrows = meters
+      .filter((m) => m.group === this._setRoom)
+      .map((m) => {
+        const v = this._cfg && this._cfg.meters ? this._cfg.meters[String(m.i)] : null;
+        const cur = v === null || v === undefined ? "–" : (v / 10 ** m.dec).toFixed(m.dec);
+        return `<tr><td class="left">${esc(m.name)}<span class="secondary">teď ${cur} m³</span></td>
+          <td><input class="num wide" id="meter-${m.i}" type="number" step="${1 / 10 ** m.dec}" value="${v === null || v === undefined ? "" : cur}" ${dis}> m³</td>
+          <td><button class="btn outlined" data-meter="${m.i}" ${dis}>Nastavit</button></td></tr>`;
+      })
+      .join("");
     const roomCard = `<div class="card"><div class="card-header">${icon("mdi:floor-plan")}Místnosti</div>
       ${rooms.map((r) => `<div class="item ${r.id === this._setRoom ? "sel" : ""}" data-setroom="${r.id}"><div class="text"><span class="name">${esc(r.name)}</span></div><span class="count">${cnt[r.id]}</span></div>`).join("")}
       <div style="height:8px"></div></div>`;
-    const main =
-      `<div class="card"><div class="card-header">${icon("mdi:tune-variant")}${esc(this._groupName(this._setRoom))}</div>${this._alerts()}` +
-      (mine.length
-        ? `<div class="scroll"><table><tr><th class="left"></th>${cols.map(([, l]) => `<th>${l}</th>`).join("")}</tr>${rows}</table></div>
-           <div class="note">Hodnota se zapíše do PLC po opuštění pole. Max. doba 0 = bez omezení, po uplynutí PLC výstup vypne (i bez Home Assistant). Náběh = doba rozsvícení stmívače z 0 na 100 %.</div>`
-        : "") +
-      `</div>` +
-      (temps.length
-        ? `<div class="card"><div class="card-header">${icon("mdi:thermometer")}Teploty</div>
-           <div class="scroll"><table><tr><th class="left"></th><th>Korekce</th><th>Výsledek</th></tr>${trows}</table></div></div>`
-        : "");
+    let main = `<div class="card"><div class="card-header">${icon("mdi:tune-variant")}${esc(this._groupName(this._setRoom))}</div>${this._alerts(false)}`;
+    if (objRows || looseRows)
+      main += `<div class="scroll"><table>${objRows}${looseRows}</table></div>
+        <div class="note">Hodnota se zapíše do PLC po opuštění pole. Max. doba 0 = bez omezení. Náběh = rozsvícení stmívače z 0 na 100 %. Žaluzie: doby jízdy a náklonu lamel změřte stopkami.</div>`;
+    main += `</div>`;
+    if (trows)
+      main += `<div class="card"><div class="card-header">${icon("mdi:thermometer")}Teploty</div>
+        <div class="scroll"><table><tr><th class="left"></th><th>Korekce</th><th>Výsledek</th></tr>${trows}</table></div></div>`;
+    if (mrows)
+      main += `<div class="card"><div class="card-header">${icon("mdi:meter-gas")}Plynoměr</div>
+        <div class="scroll"><table>${mrows}</table></div>
+        <div class="note">Stav nastavte podle fyzického plynoměru (nebo podle čítače v původním programu CP-2000). Dál ho PLC počítá samo i bez Home Assistant.</div></div>`;
     return `<div class="content ${this._narrow ? "narrow" : ""}"><div class="col">${roomCard}</div><div class="col">${main}</div></div>`;
+  }
+
+  async _setMeter(m, input) {
+    const v = parseFloat(String(input).replace(",", "."));
+    if (isNaN(v) || v < 0) return;
+    const raw = Math.round(v * 10 ** m.dec);
+    await this._run("Nastavuji plynoměr…", async () => {
+      await this._ws("config/set", { pairs: [[9000 + 2 * m.i, raw % 65536], [9001 + 2 * m.i, Math.floor(raw / 65536)]] });
+      this._cfg = await this._ws("config/get");
+      this._msg = "Stav plynoměru zapsán do PLC";
+    });
+  }
+
+  // ---------------------------------------------------------------- automatiky
+  _autoCfg(a) {
+    if (this._autoDraft && this._autoDraft.a === a) return this._autoDraft.c;
+    const m = (this._cfg && this._cfg.map) || {};
+    const c = [];
+    for (let r = 0; r < 20; r++) c.push(Number(m[String(4000 + a * 20 + r)] ?? 0));
+    return c;
+  }
+  _autoEdit(a, r, v) {
+    if (!this._autoDraft || this._autoDraft.a !== a) this._autoDraft = { a, c: this._autoCfg(a).slice() };
+    this._autoDraft.c[r] = v;
+    this._render();
+  }
+  async _autoSave(a) {
+    if (!this._autoDraft || this._autoDraft.a !== a) return;
+    const pairs = this._autoDraft.c.map((v, r) => [4000 + a * 20 + r, v & 0xffff]);
+    await this._run("Zapisuji automatiku…", async () => {
+      await this._ws("config/set", { pairs });
+      this._cfg = await this._ws("config/get");
+      this._autoDraft = null;
+      this._msg = "Automatika zapsána do PLC";
+    });
+  }
+  _tabAuto(ready) {
+    const info = this._info;
+    const autos = info.autos || [];
+    if (!autos.length)
+      return `<div class="vers"><div class="card"><div class="card-header">${icon("mdi:motion-sensor")}Automatiky</div><div class="empty">PLC nemá žádné automatiky (list Automatiky v xlsx).</div></div></div>`;
+    if (this._auto === null || this._auto >= autos.length) this._auto = 0;
+    const a = this._auto;
+    const c = this._autoCfg(a);
+    const dis = ready ? "" : "disabled";
+    const hm = (m) => (m === 0xffff ? "" : `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+    const outT = info.targets.find((t) => t.uid === c[16]);
+    const sensorSel = (r) =>
+      `<select data-ar="${r}" ${dis}><option value="0">— nic —</option>${info.sensors
+        .map((x) => `<option value="${x.uid}" ${x.uid === c[r] ? "selected" : ""}>${esc(this._groupName(x.group))} · ${esc(x.name)}</option>`)
+        .join("")}</select>`;
+    const outSel = `<select data-ar="16" ${dis}><option value="0">— nic —</option>${info.targets
+      .filter((t) => t.kind === "output" || t.kind === "dimmer")
+      .map((t) => `<option value="${t.uid}" ${t.uid === c[16] ? "selected" : ""}>${esc(this._groupName(t.group))} · ${esc(t.sub)} · ${esc(t.name)}</option>`)
+      .join("")}</select>`;
+    const list = autos
+      .map((x) => {
+        const on = this._autoCfg(x.a)[0];
+        return `<div class="item ${x.a === a ? "sel" : ""}" data-auto="${x.a}">${icon(on ? "mdi:motion-sensor" : "mdi:motion-sensor-off")}<div class="text"><span class="name">${esc(x.name)}</span><span class="secondary">${on ? "aktivní" : "vypnutá"}</span></div></div>`;
+      })
+      .join("");
+    const wins = [0, 1, 2, 3]
+      .map((i) => `<div class="win">od <input type="time" data-aw="${8 + 2 * i}" value="${hm(c[8 + 2 * i])}" ${dis}> do <input type="time" data-aw="${9 + 2 * i}" value="${hm(c[9 + 2 * i])}" ${dis}></div>`)
+      .join("");
+    const dirty = this._autoDraft && this._autoDraft.a === a;
+    const lux = this._cfg ? this._cfg.lux : null;
+    const form = `<div class="card">
+      <div class="card-header">${icon("mdi:motion-sensor")}${esc(autos[a].name)}</div>
+      ${this._alerts(false)}
+      <div class="form">
+        <label class="row"><span>Aktivní</span><input type="checkbox" data-ab="0" ${c[0] ? "checked" : ""} ${dis}></label>
+        <div class="row"><span>Čidla</span><div class="col2">${[1, 2, 3, 4].map(sensorSel).join("")}</div></div>
+        <label class="row"><span>Spouští</span><select data-ar="5" ${dis}><option value="0" ${c[5] ? "" : "selected"}>sepnutí (pohyb)</option><option value="1" ${c[5] ? "selected" : ""}>rozepnutí (otevření dveří)</option></select></label>
+        <label class="row"><span>Doba svícení</span><span><input class="num" data-am="6" type="number" min="0" max="999" value="${Math.floor(c[6] / 60)}" ${dis}> min <input class="num" data-as="6" type="number" min="0" max="59" value="${c[6] % 60}" ${dis}> s</span></label>
+        <label class="row"><span>Soumrak</span><span><input class="num" data-ar="7" type="number" min="0" max="65000" value="${c[7]}" ${dis}> lx <small class="secondary">(0 = vždy${lux !== null && lux !== undefined ? `, teď ${lux} lx` : ""})</small></span></label>
+        <div class="row"><span>Časová okna</span><div class="col2">${wins}<small class="secondary">prázdné = kdykoli</small></div></div>
+        <label class="row"><span>Výstup</span>${outSel}</label>
+        ${outT && outT.dimmer ? `<label class="row"><span>Jas</span><span><input class="num" data-ar="17" type="number" min="0" max="100" value="${c[17]}" ${dis}> % <small class="secondary">(0 = maximum)</small></span></label>` : ""}
+      </div>
+      <div class="card-actions">
+        <button class="btn" id="autocancel" ${dirty && ready ? "" : "disabled"}>Zrušit změny</button>
+        <button class="btn filled" id="autosave" ${dirty && ready ? "" : "disabled"}>${icon("mdi:content-save")}Zapsat do PLC</button>
+      </div>
+      <div class="note">Automatika rozsvítí výstup, když čidlo sepne (nebo rozepne) a je splněný soumrak i časové okno. Zhasne po uplynutí doby od posledního spuštění. Běží v PLC i bez Home Assistant.</div>
+    </div>`;
+    return `<div class="content ${this._narrow ? "narrow" : ""}"><div class="col"><div class="card"><div class="card-header">${icon("mdi:robot")}Automatiky</div>${list}<div style="height:8px"></div></div></div><div class="col">${form}</div></div>`;
   }
 
   _tabVer(ready) {
@@ -657,6 +801,22 @@ class TecomatPlcPanel extends HTMLElement {
       </div></div>`;
   }
 
+  _statusIcons() {
+    if (!this._cfg || this._busy) return "";
+    const ok = this._cfg.checksum_plc === this._cfg.checksum_calc;
+    const base = this._version(this._base);
+    const d = base ? this._diff(base) : null;
+    const plc = ok
+      ? `<span class="st ok" title="Zobrazená konfigurace odpovídá PLC">${icon("mdi:check-circle")}</span>`
+      : `<span class="st bad" title="Kontrolní součet nesedí, načtěte znovu z PLC">${icon("mdi:alert")}</span>`;
+    const ver = !base
+      ? `<span class="st warn" title="Zatím žádná uložená verze">${icon("mdi:content-save-off")}</span>`
+      : d
+        ? `<span class="st warn" title="Neuloženo: ${zmen(d)} oproti verzi „${esc(base.name)}“">${icon("mdi:content-save-alert")}<small>${d}</small></span>`
+        : `<span class="st ok" title="Odpovídá verzi „${esc(base.name)}“">${icon("mdi:content-save-check")}</span>`;
+    return `<div class="status" data-tab="ver">${plc}${ver}</div>`;
+  }
+
   _renderV2() {
     const info = this._info;
     const ready = !!(info && this._cfg && !this._busy);
@@ -665,7 +825,8 @@ class TecomatPlcPanel extends HTMLElement {
       this._entries.length > 1
         ? `<select id="entry">${this._entries.map((e) => `<option value="${e.entry_id}" ${e.entry_id === this._entry ? "selected" : ""}>${esc(e.title)}</option>`).join("")}</select>`
         : "";
-    const body = tab === "set" ? this._tabSet(ready) : tab === "ver" ? this._tabVer(ready) : this._tabCtl(ready);
+    const body =
+      tab === "set" ? this._tabSet(ready) : tab === "ver" ? this._tabVer(ready) : tab === "auto" ? this._tabAuto(ready) : this._tabCtl(ready);
     const dlg = this._dialog
       ? `<div class="backdrop" id="dlg-bg"><div class="dialog" role="dialog">
           <h2>${esc(this._dialog.title)}</h2>
@@ -678,8 +839,10 @@ class TecomatPlcPanel extends HTMLElement {
       <style>${STYLE}${STYLE_V2}</style>
       <div class="toolbar">
         <ha-menu-button></ha-menu-button>
-        <div class="title">Tecomat PLC <span style="opacity:.7;font-size:14px">${esc(info.model)} · program ${info.program}</span></div>
-        <div class="tabs">${[["ctl", "Ovladače"], ["set", "Nastavení"], ["ver", "Zálohy"]].map(([t, l]) => `<button data-tab="${t}" class="${tab === t ? "on" : ""}">${l}</button>`).join("")}</div>
+        <div class="title2">Tecomat PLC <span style="opacity:.7;font-size:14px">${esc(info.model)} · program ${info.program}</span></div>
+        <div class="tabs">${[["ctl", "Ovladače"], ["set", "Nastavení"], ["auto", "Automatiky"], ["ver", "Zálohy"]].map(([t, l]) => `<button data-tab="${t}" class="${tab === t ? "on" : ""}">${l}</button>`).join("")}</div>
+        <div style="flex:1"></div>
+        ${this._statusIcons()}
         ${entrySel}
         <button class="iconbtn" id="reload" title="Načíst z PLC" ${this._busy || !this._entry ? "disabled" : ""}>${icon("mdi:refresh")}</button>
       </div>
@@ -741,6 +904,46 @@ class TecomatPlcPanel extends HTMLElement {
         if (p) this._saveParam(p, el.value);
       })
     );
+    root.querySelectorAll("input[data-parb]").forEach((el) =>
+      el.addEventListener("change", () => {
+        const p = this._info.params.find((x) => x.p === Number(el.dataset.parb));
+        if (p) this._saveParam(p, el.checked ? 1 : 0);
+      })
+    );
+    on("button[data-meter]:not([disabled])", (el) => {
+      const m = this._info.meters.find((x) => x.i === Number(el.dataset.meter));
+      if (m) this._setMeter(m, root.getElementById(`meter-${m.i}`).value);
+    });
+    on("[data-auto]", (el) => {
+      this._auto = Number(el.dataset.auto);
+      this._autoDraft = null;
+      this._render();
+    });
+    const A = () => this._auto;
+    root.querySelectorAll("select[data-ar], input[data-ar]").forEach((el) =>
+      el.addEventListener("change", () => this._autoEdit(A(), Number(el.dataset.ar), Number(el.value) || 0))
+    );
+    root.querySelectorAll("input[data-ab]").forEach((el) =>
+      el.addEventListener("change", () => this._autoEdit(A(), Number(el.dataset.ab), el.checked ? 1 : 0))
+    );
+    root.querySelectorAll("input[data-am], input[data-as]").forEach((el) =>
+      el.addEventListener("change", () => {
+        const mi = Number(root.querySelector("input[data-am]").value) || 0;
+        const se = Number(root.querySelector("input[data-as]").value) || 0;
+        this._autoEdit(A(), 6, Math.max(0, mi * 60 + se));
+      })
+    );
+    root.querySelectorAll("input[data-aw]").forEach((el) =>
+      el.addEventListener("change", () => {
+        const m = /^(\d\d):(\d\d)/.exec(el.value);
+        this._autoEdit(A(), Number(el.dataset.aw), m ? Number(m[1]) * 60 + Number(m[2]) : 0xffff);
+      })
+    );
+    on("#autosave", () => this._autoSave(this._auto));
+    on("#autocancel", () => {
+      this._autoDraft = null;
+      this._render();
+    });
     on("button[data-restore]:not([disabled])", (el) => this._restore(el.dataset.restore));
     on("button[data-exportver]", (el) => this._exportVersion(this._version(el.dataset.exportver)));
     on("button[data-del]", (el) => this._delete(el.dataset.del));
@@ -915,11 +1118,12 @@ class TecomatPlcPanel extends HTMLElement {
   }
 
   // ---------------------------------------------------------------- vykreslení
-  _alerts() {
+  _alerts(full = true) {
     const a = (type, ic, text) => `<div class="alert ${type}">${icon(ic)}<span>${text}</span></div>`;
     const out = [];
     if (this._busy) out.push(a("info", "mdi:progress-clock", esc(this._busy)));
     if (this._error) out.push(a("error", "mdi:alert-circle", esc(this._error)));
+    if (!full) return out.join("");
     if (this._cfg && !this._busy) {
       if (this._cfg.checksum_plc === this._cfg.checksum_calc)
         out.push(a("success", "mdi:check-circle", "Zobrazená konfigurace odpovídá PLC"));
