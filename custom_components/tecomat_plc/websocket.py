@@ -9,6 +9,10 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import floor_registry as fr
 
 from .const import (
     DOMAIN,
@@ -109,7 +113,7 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
         "model": d.plc_model,
         "program": d.prog_version,
         "max_b": d.max_b,
-        "groups": [{"id": g.id, "name": g.name, "area": g.area} for g in d.groups],
+        "groups": _groups(hass, coord),
         "circuits": [
             {"m": o.p1, "uid": o.uid, "name": o.name, "group": o.group, "dimmable": bool(o.flags & 2)}
             for o in coord.matrix_circuits()
@@ -149,6 +153,74 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
         "params": [_param(o) for o in coord.params_v2()] if d.protocol >= 2 else [],
         "tech": _tech(coord) if d.protocol >= 2 else {},
     }
+
+
+def _groups(hass: HomeAssistant, coord) -> list[dict[str, Any]]:
+    """Skupiny PLC s podlažím z HA (oblast zařízení, jinak oblast podle názvu) pro řazení v panelu."""
+    devs, areas, floors = dr.async_get(hass), ar.async_get(hass), fr.async_get(hass)
+    out = []
+    for g in coord.desc.groups:
+        dev = devs.async_get_device(identifiers={(DOMAIN, f"{coord.config_entry.entry_id}_g{g.id}")})
+        area = areas.async_get_area(dev.area_id) if dev and dev.area_id else None
+        if area is None and g.area:
+            area = areas.async_get_area_by_name(g.area)
+        floor = floors.async_get_floor(area.floor_id) if area and area.floor_id else None
+        out.append({
+            "id": g.id,
+            "name": g.name,
+            "area": g.area,
+            "floor": floor.name if floor else None,
+            "flevel": floor.level if floor else None,
+        })
+    return out
+
+
+def _stale(hass: HomeAssistant, coord) -> tuple[list, list]:
+    """Entity a zařízení integrace, které aktuální program PLC už nevytváří."""
+    entry_id = coord.config_entry.entry_id
+    ents = [
+        e for e in er.async_entries_for_config_entry(er.async_get(hass), entry_id)
+        if e.unique_id not in coord.expected_uids
+    ]
+    groups = {f"{entry_id}_g{g.id}" for g in coord.desc.groups}
+    devs = [
+        d for d in dr.async_entries_for_config_entry(dr.async_get(hass), entry_id)
+        if not any(i[0] == DOMAIN and i[1] in groups for i in d.identifiers)
+    ]
+    return ents, devs
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/stale", vol.Required("entry_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+@_with_coordinator
+async def ws_stale(hass, coord, msg) -> dict[str, Any]:
+    ents, devs = _stale(hass, coord)
+    return {
+        "entities": [
+            {"entity_id": e.entity_id, "name": e.name or e.original_name or "", "uid": e.unique_id} for e in ents
+        ],
+        "devices": [{"id": d.id, "name": d.name_by_user or d.name or ""} for d in devs],
+    }
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/stale/remove", vol.Required("entry_id"): str}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_with_coordinator
+async def ws_stale_remove(hass, coord, msg) -> dict[str, Any]:
+    """Odstraní neplatné entity a zařízení (jen ty, které aktuální program nevytváří)."""
+    if not coord.expected_uids:
+        raise ValueError("Integrace ještě nevytvořila entity, úklid nelze provést")
+    ents, devs = _stale(hass, coord)
+    ereg, dreg = er.async_get(hass), dr.async_get(hass)
+    for e in ents:
+        ereg.async_remove(e.entity_id)
+    for d in devs:
+        dreg.async_update_device(d.id, remove_config_entry_id=coord.config_entry.entry_id)
+    return {"entities": len(ents), "devices": len(devs)}
 
 
 def _param(o) -> dict[str, Any]:
@@ -375,6 +447,8 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_config_get,
         ws_live,
         ws_press,
+        ws_stale,
+        ws_stale_remove,
         ws_config_set,
         ws_versions_list,
         ws_versions_save,

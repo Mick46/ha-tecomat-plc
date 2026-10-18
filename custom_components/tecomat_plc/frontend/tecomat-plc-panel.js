@@ -186,6 +186,10 @@ const STYLE_V2 = `
   .content.three { grid-template-columns: minmax(200px, 240px) minmax(260px, 320px) 1fr; }
   .content.three.narrow { grid-template-columns: 1fr; }
   .item .count { margin-left: auto; font-size: 12px; color: var(--secondary-text-color); }
+  .floor { padding: 10px 16px 2px; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--secondary-text-color); }
+  .stale { padding: 2px 16px; font-size: 13px; }
+  .stale code { color: var(--secondary-text-color); }
   .sw { padding: 12px 16px 16px; border-top: 1px solid var(--divider-color); }
   .swname { margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; }
   .swname .secondary { font-size: 12px; color: var(--secondary-text-color); }
@@ -300,6 +304,7 @@ class TecomatPlcPanel extends HTMLElement {
     this._autoDraft = null;
     this._live = null;
     this._liveTimer = null;
+    this._stale = null;
   }
 
   disconnectedCallback() {
@@ -344,6 +349,7 @@ class TecomatPlcPanel extends HTMLElement {
 
   async _selectEntry(id) {
     this._entry = id;
+    this._stale = null;
     this._info = null;
     this._cfg = null;
     this._error = "";
@@ -563,7 +569,7 @@ class TecomatPlcPanel extends HTMLElement {
     const sws = this._switches();
     const per = {};
     for (const x of sws) per[x.group] = (per[x.group] || 0) + 1;
-    const rooms = info.groups.filter((g) => per[g.id]);
+    const rooms = this._sortRooms(info.groups.filter((g) => per[g.id]));
     if (this._room === null || !per[this._room]) this._room = rooms.length ? rooms[0].id : null;
     const list = sws.filter((x) => x.group === this._room);
     let sw = list.find((x) => x.key === this._swKey);
@@ -573,7 +579,7 @@ class TecomatPlcPanel extends HTMLElement {
       this._pos = 1;
     }
     const roomCard = `<div class="card"><div class="card-header">${icon("mdi:floor-plan")}Místnosti</div>
-      ${rooms.map((r) => `<div class="item ${r.id === this._room ? "sel" : ""}" data-room="${r.id}"><div class="text"><span class="name">${esc(r.name)}</span></div><span class="count">${per[r.id]}</span></div>`).join("")}
+      ${this._roomItems(rooms, this._room, per, "data-room")}
       <div style="height:8px"></div></div>`;
     const swCard = `<div class="card"><div class="card-header">${icon("mdi:light-switch")}<div style="display:flex;flex-direction:column">Ovladače<span class="sub">${esc(this._groupName(this._room))}</span></div></div>
       ${list
@@ -618,7 +624,7 @@ class TecomatPlcPanel extends HTMLElement {
         <div class="counters"><span class="${sN >= 4 ? "full" : ""}">Krátký stisk <b>${sN}/4</b></span><span class="${lN >= 4 ? "full" : ""}">Dlouhý stisk <b>${lN}/4</b></span></div>
         <div class="filters">
           <div class="seg">${[["room", "Místnost"], ["all", "Vše"], ["sel", "Vybrané"]].map(([m, l]) => `<button data-mode="${m}" class="${this._mode === m ? "on" : ""}">${l}</button>`).join("")}</div>
-          ${this._mode === "room" ? `<select id="otherroom">${info.groups.filter((g) => info.targets.some((t) => t.group === g.id)).map((g) => `<option value="${g.id}" ${g.id === targetRoom ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select>` : ""}
+          ${this._mode === "room" ? `<select id="otherroom">${this._roomOptions(info.groups.filter((g) => info.targets.some((t) => t.group === g.id)), targetRoom)}</select>` : ""}
         </div>
         <div class="scroll"><table>
           <tr><th class="left"></th><th class="grp" colspan="4">Krátký stisk</th><th class="grp" colspan="4">Dlouhý stisk</th></tr>
@@ -651,7 +657,7 @@ class TecomatPlcPanel extends HTMLElement {
     loose.forEach((p) => add(p.group));
     info.temps.forEach((t) => add(t.group));
     meters.forEach((m) => add(m.group));
-    const rooms = info.groups.filter((g) => cnt[g.id]);
+    const rooms = this._sortRooms(info.groups.filter((g) => cnt[g.id]));
     if (this._setRoom === null || !cnt[this._setRoom]) this._setRoom = rooms.length ? rooms[0].id : null;
     const dis = ready ? "" : "disabled";
     const label = (p, t) => {
@@ -696,7 +702,7 @@ class TecomatPlcPanel extends HTMLElement {
       })
       .join("");
     const roomCard = `<div class="card"><div class="card-header">${icon("mdi:floor-plan")}Místnosti</div>
-      ${rooms.map((r) => `<div class="item ${r.id === this._setRoom ? "sel" : ""}" data-setroom="${r.id}"><div class="text"><span class="name">${esc(r.name)}</span></div><span class="count">${cnt[r.id]}</span></div>`).join("")}
+      ${this._roomItems(rooms, this._setRoom, cnt, "data-setroom")}
       <div style="height:8px"></div></div>`;
     let main = `<div class="card"><div class="card-header">${icon("mdi:tune-variant")}${esc(this._groupName(this._setRoom))}</div>${this._alerts(false)}`;
     if (objRows || looseRows)
@@ -980,7 +986,43 @@ class TecomatPlcPanel extends HTMLElement {
         <div class="card-header">${icon("mdi:history")}<div style="display:flex;flex-direction:column">Uložené verze<span class="sub">společné pro všechny uživatele, součást záloh Home Assistant</span></div></div>
         ${vers}
         <div class="note">Obnovení zapíše verzi do PLC. Import uloží soubor jako novou verzi, do PLC se zapíše až tlačítkem Obnovit.${base ? "" : ""}</div>
-      </div></div>`;
+      </div>
+      ${this._staleCard()}</div>`;
+  }
+
+  _staleCard() {
+    const st = this._stale;
+    if (!st) return "";
+    const n = st.entities.length + st.devices.length;
+    const list = [
+      ...st.devices.map((d) => `<div class="stale">${icon("mdi:devices")} zařízení ${esc(d.name)}</div>`),
+      ...st.entities.map((e) => `<div class="stale">${esc(e.name || e.entity_id)} <code>${esc(e.entity_id)}</code></div>`),
+    ].join("");
+    return `<div class="card">
+      <div class="card-header">${icon("mdi:broom")}<div style="display:flex;flex-direction:column">Neplatné entity<span class="sub">${n ? `${n} z předchozích verzí programu` : "žádné, vše odpovídá programu v PLC"}</span></div></div>
+      ${list}
+      ${n ? `<div class="note">Tyto entity a zařízení integrace vytvořila pro dřívější program PLC a aktuální program je už nemá. Jsou nedostupné.
+        Před odstraněním zkontrolujte, že je nepoužívá dashboard ani automatizace.</div>
+        <div class="card-actions"><button class="btn danger" id="staleremove" ${this._busy ? "disabled" : ""}>${icon("mdi:delete-sweep")}Odstranit (${n})</button></div>` : ""}
+    </div>`;
+  }
+  async _loadStale() {
+    try {
+      this._stale = await this._ws("stale");
+    } catch (e) {
+      this._stale = null;
+    }
+    if (this._tab === "ver") this._render();
+  }
+  async _removeStale() {
+    const n = this._stale ? this._stale.entities.length + this._stale.devices.length : 0;
+    const ok = await this._ask({ title: "Odstranit neplatné entity?", text: `Odstraní se ${n} položek z registru Home Assistant. Nelze vrátit.`, ok: "Odstranit", danger: true });
+    if (!ok) return;
+    await this._run("Odstraňuji neplatné entity…", async () => {
+      const r = await this._ws("stale/remove");
+      this._msg = `Odstraněno: ${r.entities} entit, ${r.devices} zařízení`;
+      this._stale = await this._ws("stale");
+    });
   }
 
   _statusIcons() {
@@ -1012,6 +1054,10 @@ class TecomatPlcPanel extends HTMLElement {
         : tab === "tech" ? this._tabTech(ready) : this._tabCtl(ready);
     if (tab === "tech") this._startLive();
     else this._stopLive();
+    if (tab === "ver" && this._stale === null) {
+      this._stale = undefined;  // načítá se
+      this._loadStale();
+    }
     const dlg = this._dialog
       ? `<div class="backdrop" id="dlg-bg"><div class="dialog" role="dialog">
           <h2>${esc(this._dialog.title)}</h2>
@@ -1151,6 +1197,7 @@ class TecomatPlcPanel extends HTMLElement {
     on("button[data-exportver]", (el) => this._exportVersion(this._version(el.dataset.exportver)));
     on("button[data-del]", (el) => this._delete(el.dataset.del));
     on("#exportcur", () => this._exportVersion(null));
+    on("#staleremove", () => this._removeStale());
     on("#savever", () => this._saveVersion());
     on("#reload", () => this._readPlc());
     const fileIn = root.getElementById("importfile");
@@ -1184,12 +1231,39 @@ class TecomatPlcPanel extends HTMLElement {
   _diff(ver) {
     if (!ver || !this._cfg) return null;
     let n = 0;
+    // předpověď FVE posílá automatizace z HA průběžně, není to nastavení
+    const skip = new Set(((this._info && this._info.params) || []).filter((p) => p.tech === "tuv" && p.n === 5).map((p) => String(20000 + p.p)));
     const keys = new Set([...Object.keys(ver.map), ...Object.keys(this._cfg.map)]);
-    for (const k of keys) if ((ver.map[k] || 0) !== (this._cfg.map[k] || 0)) n++;
+    for (const k of keys) if (!skip.has(k) && (ver.map[k] || 0) !== (this._cfg.map[k] || 0)) n++;
     const vc = ver.corr || {};
     const cc = this._cfg.corr || {};
     for (const k of new Set([...Object.keys(vc), ...Object.keys(cc)])) if ((vc[k] || 0) !== (cc[k] || 0)) n++;
     return n;
+  }
+  // místnosti podle podlaží v HA (úroveň, bez podlaží na konec) a uvnitř abecedně
+  _sortRooms(rooms) {
+    const lvl = (g) => (g.flevel === null || g.flevel === undefined ? (g.floor ? 900 : 999) : g.flevel);
+    return [...rooms].sort((a, b) => lvl(a) - lvl(b) || (a.floor || "").localeCompare(b.floor || "", "cs") || a.name.localeCompare(b.name, "cs"));
+  }
+  _roomItems(rooms, sel, cnt, attr) {
+    let last;
+    return this._sortRooms(rooms)
+      .map((r) => {
+        const head = r.floor !== last ? `<div class="floor">${esc(r.floor || "Ostatní")}</div>` : "";
+        last = r.floor;
+        return `${head}<div class="item ${r.id === sel ? "sel" : ""}" ${attr}="${r.id}"><div class="text"><span class="name">${esc(r.name)}</span></div><span class="count">${cnt[r.id]}</span></div>`;
+      })
+      .join("");
+  }
+  _roomOptions(rooms, sel) {
+    let last;
+    let html = "";
+    for (const g of this._sortRooms(rooms)) {
+      if (g.floor !== last) html += `${last !== undefined ? "</optgroup>" : ""}<optgroup label="${esc(g.floor || "Ostatní")}">`;
+      last = g.floor;
+      html += `<option value="${g.id}" ${g.id === sel ? "selected" : ""}>${esc(g.name)}</option>`;
+    }
+    return html + (last !== undefined ? "</optgroup>" : "");
   }
   _groupName(id) {
     const g = this._info.groups.find((x) => x.id === id);

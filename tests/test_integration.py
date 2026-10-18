@@ -500,6 +500,26 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         await ws.send_json({"id": 12, "type": f"{DOMAIN}/config/get", "entry_id": entry.entry_id})
         cfg = (await ws.receive_json())["result"]
         assert cfg["map"]["20003"] == 1 and cfg["checksum_plc"] == cfg["checksum_calc"]
+
+        # podlaží z HA: oblast Kuchyň v podlaží Přízemí
+        from homeassistant.helpers import area_registry as ar, floor_registry as fr
+        floor = fr.async_get(hass).async_create("Přízemí", level=0)
+        area = ar.async_get(hass).async_get_area_by_name("Kuchyň") or ar.async_get(hass).async_create("Kuchyň")
+        ar.async_get(hass).async_update(area.id, floor_id=floor.floor_id)
+        await ws.send_json({"id": 13, "type": f"{DOMAIN}/info", "entry_id": entry.entry_id})
+        groups = {g["name"]: g for g in (await ws.receive_json())["result"]["groups"]}
+        assert groups["Kuchyň"]["floor"] == "Přízemí" and groups["Kuchyň"]["flevel"] == 0
+        assert groups["Chodba"]["floor"] is None
+
+        # úklid: entita z dřívějšího programu (např. kotel jako switch) je neplatná, ostatní ne
+        old = ent.async_get_or_create("switch", DOMAIN, f"{entry.entry_id}_999", config_entry=entry)
+        await ws.send_json({"id": 14, "type": f"{DOMAIN}/stale", "entry_id": entry.entry_id})
+        stale = (await ws.receive_json())["result"]
+        assert [e["entity_id"] for e in stale["entities"]] == [old.entity_id] and stale["devices"] == []
+        await ws.send_json({"id": 15, "type": f"{DOMAIN}/stale/remove", "entry_id": entry.entry_id})
+        assert (await ws.receive_json())["result"] == {"entities": 1, "devices": 0}
+        assert ent.async_get(old.entity_id) is None
+        assert ent.async_get(mode) is not None
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await plc.stop()

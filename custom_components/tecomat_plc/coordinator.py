@@ -132,6 +132,7 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         self.versions = None  # VersionStore, nastaví __init__.py
         self.root_device_id: str | None = None  # id zařízení PLC (skupina 0) v registru
         self.options_snapshot: dict = dict(entry.options)
+        self.expected_uids: set[str] = set()  # unique_id entit, které integrace pro aktuální program vytvořila
 
         sb = desc.status_base
         addrs: set[int] = set(range(sb, sb + STATUS_LEN))
