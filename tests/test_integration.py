@@ -520,6 +520,22 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         assert (await ws.receive_json())["result"] == {"entities": 1, "devices": 0}
         assert ent.async_get(old.entity_id) is None
         assert ent.async_get(mode) is not None
+
+        # část 4: role hodnot pro panel, elektroměr jako druhé nastavitelné měřidlo (kWh)
+        await ws.send_json({"id": 16, "type": f"{DOMAIN}/info", "entry_id": entry.entry_id})
+        info = (await ws.receive_json())["result"]
+        assert info["tech"]["values"]["grid1"]["uid"] == 311 and info["tech"]["values"]["e_imp"]["unit"] == "kWh"
+        assert [(m["uid"], m["unit"]) for m in info["meters"]] == [(241, "m³"), (314, "kWh")]
+        await ws.send_json({"id": 17, "type": f"{DOMAIN}/config/set", "entry_id": entry.entry_id,
+                            "pairs": [[9002, 2000000 % 65536], [9003, 2000000 // 65536]]})
+        assert (await ws.receive_json())["success"]
+        assert plc.e_imp == 2000000
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        odb = ent.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_314")
+        assert float(hass.states.get(odb).state) == 2000.0
+        l1 = ent.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_311")
+        assert float(hass.states.get(l1).state) == -250
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await plc.stop()

@@ -41,6 +41,9 @@ OBJECTS2 = [
     (11, 1, 30323, "O1", 4, 0, 0x20, 7000, "Topení stav"),         # stav (jen ke čtení)
     (12, 1, 30324, 0, 0, 0, 0, 7012, "Teplá voda dezinfikovat"),   # akce
     (10, 2, 30325, 0, 1, 4, (11 << 8) | 0x10, 65103, "Bazén ohřev"),  # parametr ano/ne jako entita (switch)
+    # část 4: výkon fáze L1 z EM03 (role grid1), odběr jako nastavitelné měřidlo (role e_imp, schránka 9002/9003)
+    (6, 2, 30326, 0, 1, 1, 1 | (1 << 8), 311, "Výkon L1"),
+    (6, 2, 30328, 3, 2, 2, 1 | 2 | 4 | (11 << 8), 314, "Odběr"),
 ]
 AUTO_NAMES = ["PIR vstup"]
 OPTIONS = ["Vypnuto|Zapnuto|Auto", "Vyp|Teplo|Řídí HA|Záloha"]  # simulátor má kratší řetězce než PLC
@@ -82,6 +85,7 @@ class MockPlcV2(MockPlc):
         self.box[20003] = 2      # režim topení Auto
         self.box[20004] = 0      # ohřev bazénu vypnut
         self.presses = 0
+        self.e_imp = 123456
         self.box.update({4000: 1, 4001: 216, 4006: 20, 4007: 400, 4016: 20})
         for r in range(8, 16):
             self.box[4000 + r] = 0xFFFF
@@ -150,4 +154,9 @@ class MockPlcV2(MockPlc):
         if r.get(30324, 0) == 1:
             self.presses += 1
         r[30324] = 0
+        # elektroměr: výkon L1 -250 W (dodávka), odběr Wh nastavitelný 9002/9003
+        r[30326], r[30327] = 0xFFFF, (-250) & 0xFFFF
+        if 9003 in self.box:
+            self.e_imp = self.box.pop(9003) * 65536 + self.box.pop(9002, 0)
+        r[30328], r[30329] = self.e_imp >> 16, self.e_imp & 0xFFFF
         r[STATUS + 4] = 1 if r.get(STATUS + 0, 0) else 0

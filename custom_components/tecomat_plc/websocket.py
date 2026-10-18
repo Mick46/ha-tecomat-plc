@@ -24,6 +24,7 @@ from .const import (
     T_LIGHT,
     T_SELECT,
     TECH_PARAM_BASES,
+    VALUE_ROLES,
     SUBTYPES,
     T_BINARY,
     T_COVER,
@@ -147,7 +148,8 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
         else [],
         "autos": [{"a": i, "name": n} for i, n in enumerate(d.autos)],
         "meters": [
-            {"i": i, "uid": o.uid, "name": o.name, "group": o.group, "addr": o.addr, "dec": o.p1}
+            {"i": i, "uid": o.uid, "name": o.name, "group": o.group, "addr": o.addr, "dec": o.p1,
+             "unit": UNIT_LABELS.get(o.p2, "")}
             for i, o in enumerate(x for x in d.objects_of(T_VALUE) if x.flags & F_VALUE_SET)
         ],
         "params": [_param(o) for o in coord.params_v2()] if d.protocol >= 2 else [],
@@ -272,7 +274,12 @@ def _tech(coord) -> dict[str, Any]:
         if o.flags & F_READONLY
     }
     extra = {o.uid: {"uid": o.uid, "name": o.name, "addr": o.addr} for o in d.objects_of(T_VALUE, T_ACTION) if 7000 <= o.uid < 7100}
-    return {"outputs": outs, "circuits": circuits, "temps": temps, "states": state, "extra": extra}
+    values = {
+        VALUE_ROLES[o.flags >> 8]: {"uid": o.uid, "name": o.name, "addr": o.addr, "dec": o.p1, "unit": UNIT_LABELS.get(o.p2, "")}
+        for o in d.objects_of(T_VALUE)
+        if (o.flags >> 8) in VALUE_ROLES
+    }
+    return {"outputs": outs, "circuits": circuits, "temps": temps, "states": state, "extra": extra, "values": values}
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/config/get", vol.Required("entry_id"): str})

@@ -77,7 +77,11 @@ UNIT_TIME = 13         # parametr: minuty od půlnoci (panel hh:mm)
 ROLE_OUT = {1: "kotel", 2: "heads", 3: "pump", 4: "tuv", 5: "pool_filter", 6: "pool_heat", 7: "circuit"}
 ROLE_TEMP = {1: "outdoor", 2: "tuv_top", 3: "tuv_bottom", 4: "pool"}
 # technologie: parametr n má UID 30000 + base·5 + n
-TECH_PARAM_BASES = {"heat": 65000, "tuv": 65050, "pool": 65100}
+TECH_PARAM_BASES = {"heat": 65000, "tuv": 65050, "pool": 65100, "fve": 65150, "export": 65200}
+TECH_FVE_STATUS = 7030
+# role měřené hodnoty (VALUE flags bity 8–15)
+VALUE_ROLES = {1: "grid1", 2: "grid2", 3: "grid3", 4: "ssr1", 5: "ssr2", 6: "ssr3", 7: "soc", 8: "pv", 9: "explim",
+               10: "exp15", 11: "e_imp", 12: "e_exp", 13: "e_imp_day", 14: "e_exp_day", 15: "grid", 16: "inv_age"}
 TECH_HEAT_STATUS, TECH_TUV_STATUS, TECH_TUV_DAYS, TECH_TUV_ACTION = 7000, 7010, 7011, 7012
 
 # podtyp výstupu (protokol 2, meta p2 u LIGHT/SWITCH/DIMMER)

@@ -696,8 +696,8 @@ class TecomatPlcPanel extends HTMLElement {
       .map((m) => {
         const v = this._cfg && this._cfg.meters ? this._cfg.meters[String(m.i)] : null;
         const cur = v === null || v === undefined ? "–" : (v / 10 ** m.dec).toFixed(m.dec);
-        return `<tr><td class="left">${esc(m.name)}<span class="secondary">teď ${cur} m³</span></td>
-          <td><input class="num wide" id="meter-${m.i}" type="number" step="${1 / 10 ** m.dec}" value="${v === null || v === undefined ? "" : cur}" ${dis}> m³</td>
+        return `<tr><td class="left">${esc(m.name)}<span class="secondary">teď ${cur} ${esc(m.unit || "m³")}</span></td>
+          <td><input class="num wide" id="meter-${m.i}" type="number" step="${1 / 10 ** m.dec}" value="${v === null || v === undefined ? "" : cur}" ${dis}> ${esc(m.unit || "m³")}</td>
           <td><button class="btn outlined" data-meter="${m.i}" ${dis}>Nastavit</button></td></tr>`;
       })
       .join("");
@@ -713,16 +713,17 @@ class TecomatPlcPanel extends HTMLElement {
       main += `<div class="card"><div class="card-header">${icon("mdi:thermometer")}Teploty</div>
         <div class="scroll"><table><tr><th class="left"></th><th>Korekce</th><th>Výsledek</th></tr>${trows}</table></div></div>`;
     if (mrows)
-      main += `<div class="card"><div class="card-header">${icon("mdi:meter-gas")}Plynoměr</div>
+      main += `<div class="card"><div class="card-header">${icon("mdi:counter")}Měřidla</div>
         <div class="scroll"><table>${mrows}</table></div>
-        <div class="note">Stav nastavte podle fyzického plynoměru (nebo podle čítače v původním programu CP-2000). Dál ho PLC počítá samo i bez Home Assistant.</div></div>`;
+        <div class="note">Stav nastavte podle fyzického měřidla (nebo podle čítače v původním programu CP-2000). Dál ho PLC počítá samo i bez Home Assistant.</div></div>`;
     return `<div class="content ${this._narrow ? "narrow" : ""}"><div class="col">${roomCard}</div><div class="col">${main}</div></div>`;
   }
 
   _tabList() {
     const t = [["ctl", "Ovladače"], ["set", "Nastavení"], ["auto", "Automatiky"]];
     const tech = (this._info && this._info.tech) || {};
-    if ((this._info.params || []).some((p) => p.tech) || (tech.circuits || []).length) t.push(["tech", "Technologie"]);
+    if ((this._info.params || []).some((p) => p.tech) || (tech.circuits || []).length || Object.keys(tech.values || {}).length)
+      t.push(["tech", "Technologie"]);
     t.push(["ver", "Zálohy"]);
     return t;
   }
@@ -867,6 +868,68 @@ class TecomatPlcPanel extends HTMLElement {
         ${row("Ohřev min / max", field(tp("pool", 4)) + field(tp("pool", 5)))}
         <div class="note">Tepelné čerpadlo běží jen při běžící filtraci.</div></div>`);
     }
+    // FVE: bojler z přebytků, omezení dodávky, elektroměr
+    const V = tech.values || {};
+    const vv = (role) => {
+      const x = V[role];
+      const v = x ? lv(x.addr) : null;
+      return v === null || v === undefined ? null : v / 10 ** x.dec;
+    };
+    const fmt = (role, d = 0, unit = "") => {
+      const v = vv(role);
+      return v === null ? "–" : `${v.toFixed(d)}${unit ? " " + unit : ""}`;
+    };
+    const watts = (v) => (v === null ? "–" : `<span style="color:${v <= 0 ? "var(--success-color, #43a047)" : "var(--error-color)"}">${v > 0 ? "+" : ""}${Math.round(v)} W</span>`);
+    if (tp("fve", 0)) {
+      const st = state(7030);
+      const cls = st === "Topí" ? "on" : /Chyba/.test(st) ? "warn" : "";
+      const rows = [1, 2, 3]
+        .map((ph) => {
+          const d = vv(`ssr${ph}`);
+          return `<tr><td class="left">L${ph}</td><td>${watts(vv(`grid${ph}`))}</td>
+            <td style="text-align:left"><span style="display:inline-block;width:110px;height:8px;border-radius:4px;background:var(--secondary-background-color);vertical-align:middle;margin-right:8px;overflow:hidden">
+            <span style="display:block;height:100%;width:${d || 0}%;background:var(--primary-color)"></span></span>${d === null ? "–" : d + " %"}</td></tr>`;
+        })
+        .join("");
+      cards.push(`<div class="card"><div class="card-header">${icon("mdi:solar-power-variant")}Bojler z přebytků FVE<span class="badge ${cls}">${esc(st || "–")}</span></div>
+        <div class="tchips">
+          ${T.tuv_bottom ? `<div class="tchip"><span>Bojler dole</span><b>${temp(T.tuv_bottom)}</b></div>` : ""}
+          ${T.tuv_top ? `<div class="tchip"><span>Bojler nahoře</span><b>${temp(T.tuv_top)}</b></div>` : ""}
+          ${V.soc ? `<div class="tchip"><span>Baterie</span><b>${fmt("soc", 0, "%")}</b></div>` : ""}
+          ${V.pv ? `<div class="tchip"><span>Výkon panelů</span><b>${vv("pv") === null ? "–" : (vv("pv") / 1000).toFixed(2) + " kW"}</b></div>` : ""}
+        </div>
+        <div class="scroll"><table><tr><th class="left">Fáze</th><th>Síť (EM03, + odběr)</th><th>SSR výkon</th></tr>${rows}</table></div>
+        ${row("Ohřev z FVE", field(tp("fve", 0), "zapnuto"))}
+        ${row("Cílový přetok na fázi", field(tp("fve", 1)))}
+        ${row("Max. teplota dole / hystereze", field(tp("fve", 2)) + field(tp("fve", 3)))}
+        ${row("Průměrování měření", field(tp("fve", 4)))}
+        ${row("Regulátor Ki / Kp", field(tp("fve", 9)) + field(tp("fve", 10)))}
+        ${row("Výkon tělesa na fázi", field(tp("fve", 11)))}
+        ${row("Ruční test", field(tp("fve", 5), "zapnuto") + field(tp("fve", 6), "L1") + field(tp("fve", 7), "L2") + field(tp("fve", 8), "L3"))}
+        <div class="note">PI regulátor na každé fázi drží malý přetok do sítě (fakturace je po fázích). Výkon z elektroměru EM03 se průměruje přes celé periody PWM
+          (průměrování = počet sekund, PWM má periodu 1 s). Když se měření 30 s nemění (výpadek CIB) nebo vypadne čidlo dole, SSR se vypnou.
+          Ruční test nastaví pevný výkon SSR pro porovnání měření se Shelly (max. teplota platí i v testu).</div></div>`);
+    }
+    if (tp("export", 0)) {
+      const age = vv("inv_age");
+      const ok = age !== null && age < 30;
+      cards.push(`<div class="card"><div class="card-header">${icon("mdi:transmission-tower-export")}Omezení dodávky do sítě
+          <span class="badge ${ok ? "on" : "warn"}">${ok ? "střídač · limit " + fmt("explim", 1, "%") : "střídač neodpovídá"}</span></div>
+        ${row("Řízení omezení z PLC", field(tp("export", 0), "zapnuto"))}
+        ${row("Plný export od baterie", field(tp("export", 1)))}
+        ${row("Omezený export", field(tp("export", 2)))}
+        ${row("Pojistka v 15min intervalu", field(tp("export", 3)))}
+        ${row("Dodáno v tomto intervalu", fmt("exp15", 2, "kWh"))}
+        <div class="note">Baterie pod hranicí → omezený export, jinak 100 %. Když se v 15min intervalu (podle EM03) dodá víc než pojistka, omezený export do konce intervalu.
+          Do střídače se zapisuje jen při změně. Zapněte až po vypnutí automatizace exportu v Home Assistant, jinak by se přetahovaly.</div></div>`);
+    }
+    if (V.e_imp || V.e_exp) {
+      cards.push(`<div class="card"><div class="card-header">${icon("mdi:meter-electric")}Elektroměr EM03</div>
+        <div class="scroll"><table><tr><th class="left"></th><th>Celkem</th><th>Dnes</th></tr>
+          <tr><td class="left">Odběr</td><td>${fmt("e_imp", 1, "kWh")}</td><td>${fmt("e_imp_day", 2, "kWh")}</td></tr>
+          <tr><td class="left">Dodávka</td><td>${fmt("e_exp", 1, "kWh")}</td><td>${fmt("e_exp_day", 2, "kWh")}</td></tr></table></div>
+        <div class="note">PLC počítá energii z výkonu fází po fázích jako elektroměr distributora. Stav celkem jde nastavit v záložce Nastavení (Měřidla).</div></div>`);
+    }
     return `${this._alerts(false)}<div class="tech ${this._narrow ? "narrow" : ""}">${cards.join("")}</div>`;
   }
 
@@ -874,10 +937,10 @@ class TecomatPlcPanel extends HTMLElement {
     const v = parseFloat(String(input).replace(",", "."));
     if (isNaN(v) || v < 0) return;
     const raw = Math.round(v * 10 ** m.dec);
-    await this._run("Nastavuji plynoměr…", async () => {
+    await this._run("Nastavuji stav měřidla…", async () => {
       await this._ws("config/set", { pairs: [[9000 + 2 * m.i, raw % 65536], [9001 + 2 * m.i, Math.floor(raw / 65536)]] });
       this._cfg = await this._ws("config/get");
-      this._msg = "Stav plynoměru zapsán do PLC";
+      this._msg = `${m.name}: stav zapsán do PLC`;
     });
   }
 
