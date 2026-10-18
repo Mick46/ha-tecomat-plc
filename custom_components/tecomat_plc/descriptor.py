@@ -27,6 +27,7 @@ from .const import (
     H_STRS_BASE,
     H_TST_BASE,
     H_WINDOW_BASE,
+    T_SELECT,
 )
 
 
@@ -53,6 +54,7 @@ class PlcObject:
     flags: int
     uid: int
     name: str
+    options: list[str] = field(default_factory=list)  # SELECT: názvy voleb
 
 
 @dataclass
@@ -133,6 +135,8 @@ async def read_descriptor(client) -> Descriptor:
         window_base=hdr[H_WINDOW_BASE],
     )
 
+    meta = await client.read_many(hdr[H_META_BASE], n_obj * stride) if n_obj else []
+
     # řetězce
     tst = await client.read_holding(hdr[H_TST_BASE], 40)
     swap, sstride, sofs = _detect_strings(tst)
@@ -141,6 +145,9 @@ async def read_descriptor(client) -> Descriptor:
     n_autos = hdr[H_AUTOS] if hdr[H_PROTOCOL] >= 2 else 0
     auto_ofs = hdr[H_AUTO_NAME_OFS] if n_autos else 0
     n_strs = max(obj_ofs + n_obj, auto_ofs + n_autos)
+    for i in range(n_obj):  # volby (SELECT) mají vlastní řetězec
+        if meta[i * stride] == T_SELECT:
+            n_strs = max(n_strs, meta[i * stride + 3] + 1)
     nbytes = n_strs * sstride + sofs
     sregs = await client.read_many(hdr[H_STRS_BASE], (nbytes + 1) // 2)
     sraw = _regs_to_bytes(sregs, swap)
@@ -154,7 +161,6 @@ async def read_descriptor(client) -> Descriptor:
 
     desc.autos = [s(auto_ofs + i) or f"Automatika {i + 1}" for i in range(n_autos)]
 
-    meta = await client.read_many(hdr[H_META_BASE], n_obj * stride) if n_obj else []
     for i in range(n_obj):
         m = meta[i * stride : i * stride + 8]
         if not m or m[0] == 0:
@@ -171,6 +177,7 @@ async def read_descriptor(client) -> Descriptor:
                 flags=m[6],
                 uid=m[7] or (i + 1),
                 name=s(obj_ofs + i) or f"Objekt {i + 1}",
+                options=s(m[3]).split("|") if m[0] == T_SELECT else [],
             )
         )
     return desc

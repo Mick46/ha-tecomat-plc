@@ -8,13 +8,15 @@ from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode, LightEnti
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import T_DIMMER, T_LIGHT
+from .const import F_READONLY, T_DIMMER, T_LIGHT
 from .entity import TecomatEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback) -> None:
     coord = entry.runtime_data
-    entities: list[LightEntity] = [TecomatLight(coord, o) for o in coord.desc.objects_of(T_LIGHT)]
+    entities: list[LightEntity] = [
+        TecomatLight(coord, o) for o in coord.desc.objects_of(T_LIGHT) if not o.flags & F_READONLY
+    ]
     entities += [TecomatDimmer(coord, o) for o in coord.desc.objects_of(T_DIMMER)]
     async_add_entities(entities)
 

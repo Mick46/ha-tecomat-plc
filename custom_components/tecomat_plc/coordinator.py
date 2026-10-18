@@ -39,7 +39,10 @@ from .const import (
     T_GATE,
     T_DIMMER,
     T_LIGHT,
+    T_ACTION,
     T_NUMBER,
+    T_SELECT,
+    F_READONLY,
     T_SWITCH,
     T_TEMP,
     T_VALUE,
@@ -143,7 +146,7 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
                 addrs.update(range(o.addr, o.addr + 5))
             elif o.type == T_GATE:
                 addrs.update((o.addr, o.addr + 1))
-            elif o.type == T_NUMBER:
+            elif o.type in (T_NUMBER, T_SELECT, T_ACTION):
                 addrs.add(o.addr)
             elif o.type == T_VALUE:
                 addrs.add(o.addr)
@@ -275,7 +278,11 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         return self.desc.objects_of(T_BUTTON)
 
     def targets_v2(self):
-        return self.desc.objects_of(T_LIGHT, T_SWITCH, T_DIMMER, T_COVER, T_GATE)
+        return [o for o in self.desc.objects_of(T_LIGHT, T_SWITCH, T_DIMMER, T_COVER, T_GATE) if not o.flags & F_READONLY]
+
+    def params_v2(self):
+        """Parametry v PLC (schránka 20000 + p3): čísla a volby (ne stavové volby)."""
+        return [o for o in self.desc.objects_of(T_NUMBER, T_SELECT) if not (o.type == T_SELECT and o.flags & F_READONLY)]
 
     def config_ranges_v2(self) -> list[tuple[int, int]]:
         """Oblasti konfigurace (začátek, počet) pro čtecí okno a zálohy."""
@@ -285,7 +292,7 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
             ranges.append((0, nb * BTN_SLOTS))
         if self.desc.autos:
             ranges.append((AUTO_INDEX_BASE, len(self.desc.autos) * AUTO_REGS))
-        params = self.desc.objects_of(T_NUMBER)
+        params = self.params_v2()
         if params:
             ranges.append((PARAM_INDEX_BASE, max(o.p3 for o in params) + 1))
         return ranges

@@ -18,7 +18,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import S_CFG_CHECKSUM, S_HB_OUT, T_TEMP, T_VALUE
+from .const import F_READONLY, S_CFG_CHECKSUM, S_HB_OUT, T_SELECT, T_TEMP, T_VALUE
 from .entity import TecomatEntity, TecomatStatusEntity
 
 
@@ -29,6 +29,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
         entities.append(TecomatTemp(coord, o, offset=1, suffix=""))
         entities.append(TecomatTemp(coord, o, offset=0, suffix="_raw"))
     entities.extend(TecomatValue(coord, o) for o in coord.desc.objects_of(T_VALUE))
+    entities.extend(TecomatState(coord, o) for o in coord.desc.objects_of(T_SELECT) if o.flags & F_READONLY)
     entities.append(TecomatStatusSensor(coord, "heartbeat", "Heartbeat PLC", S_HB_OUT))
     entities.append(TecomatStatusSensor(coord, "checksum", "Kontrolní součet konfigurace", S_CFG_CHECKSUM))
     async_add_entities(entities)
@@ -67,6 +68,7 @@ UNITS = {
     8: UnitOfVolume.CUBIC_METERS,
     9: UnitOfTime.SECONDS,
     10: UnitOfTime.MINUTES,
+    12: UnitOfTime.DAYS,
 }
 CLASSES = {
     1: SensorDeviceClass.POWER,
@@ -103,6 +105,23 @@ class TecomatValue(TecomatEntity, SensorEntity):
         if v is None:
             return None
         return v / self._div if self._div > 1 else v
+
+
+class TecomatState(TecomatEntity, SensorEntity):
+    """Stav logiky PLC jako výčet (např. kdo řídí topení, režim teplé vody teď)."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+
+    def __init__(self, coordinator, obj) -> None:
+        super().__init__(coordinator, obj)
+        self._attr_options = obj.options
+
+    @property
+    def native_value(self) -> str | None:
+        v = self.coordinator.get(self.obj.addr)
+        if v is None or v >= len(self.obj.options):
+            return None
+        return self.obj.options[v]
 
 
 class TecomatStatusSensor(TecomatStatusEntity, SensorEntity):

@@ -7,7 +7,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import S_HA_ONLINE, T_BINARY
+from .const import F_READONLY, S_HA_ONLINE, T_LIGHT, T_BINARY, T_SWITCH
 from .entity import TecomatEntity, TecomatStatusEntity
 
 DEVICE_CLASSES = {
@@ -24,6 +24,9 @@ DEVICE_CLASSES = {
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback) -> None:
     coord = entry.runtime_data
     entities: list[BinarySensorEntity] = [TecomatBinary(coord, o) for o in coord.desc.objects_of(T_BINARY)]
+    entities += [
+        TecomatOutputState(coord, o) for o in coord.desc.objects_of(T_LIGHT, T_SWITCH) if o.flags & F_READONLY
+    ]
     entities.append(TecomatHaOnline(coord))
     async_add_entities(entities)
 
@@ -42,6 +45,26 @@ class TecomatBinary(TecomatEntity, BinarySensorEntity):
             return None
         bit = bool((v >> (self.obj.p1 & 15)) & 1)
         return bit != bool(self.obj.flags & 1)
+
+
+# protokol 2: podtyp výstupu -> ikona (stejné jako switch.py)
+ICONS = {4: "mdi:pump", 5: "mdi:fan", 7: "mdi:water-boiler", 8: "mdi:water-thermometer", 9: "mdi:power-plug"}
+
+
+class TecomatOutputState(TecomatEntity, BinarySensorEntity):
+    """Výstup, který řídí logika PLC (kotel, ohřev vody, čerpadla …): v HA jen stav."""
+
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
+
+    def __init__(self, coordinator, obj) -> None:
+        super().__init__(coordinator, obj)
+        if obj.p2 in ICONS:
+            self._attr_icon = ICONS[obj.p2]
+
+    @property
+    def is_on(self) -> bool | None:
+        v = self.coordinator.get(self.obj.addr)
+        return None if v is None else v != 0
 
 
 class TecomatHaOnline(TecomatStatusEntity, BinarySensorEntity):

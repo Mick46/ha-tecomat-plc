@@ -12,7 +12,14 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     DOMAIN,
+    F_READONLY,
     F_VALUE_SET,
+    ROLE_OUT,
+    ROLE_TEMP,
+    T_ACTION,
+    T_LIGHT,
+    T_SELECT,
+    TECH_PARAM_BASES,
     SUBTYPES,
     T_BINARY,
     T_COVER,
@@ -23,6 +30,8 @@ from .const import (
     T_TEMP,
     T_VALUE,
     UNIT_BOOL,
+    UNIT_TIME,
+    S_HA_ONLINE,
 )
 from .sensor import UNITS
 
@@ -137,26 +146,61 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
             {"i": i, "uid": o.uid, "name": o.name, "group": o.group, "addr": o.addr, "dec": o.p1}
             for i, o in enumerate(x for x in d.objects_of(T_VALUE) if x.flags & F_VALUE_SET)
         ],
-        "params": [
-            {
-                "p": o.p3,
-                "uid": o.uid,
-                "name": o.name,
-                "group": o.group,
-                "min": o.p1 - 65536 if o.p1 > 32767 else o.p1,
-                "max": o.p2 - 65536 if o.p2 > 32767 else o.p2,
-                "dec": o.flags & 7,
-                "unit": UNIT_LABELS.get(o.flags >> 8, ""),
-                "bool": (o.flags >> 8) == UNIT_BOOL,
-                # generátor: UID parametru = 30000 + UID objektu·5 + druh (1 max. doba, 2 max. jas, 3 náběh)
-                "target": (o.uid - 30000) // 5 if o.uid > 30000 else 0,
-                "kind": (o.uid - 30000) % 5 if o.uid > 30000 else 0,
-            }
-            for o in d.objects_of(T_NUMBER)
-        ]
-        if d.protocol >= 2
-        else [],
+        "params": [_param(o) for o in coord.params_v2()] if d.protocol >= 2 else [],
+        "tech": _tech(coord) if d.protocol >= 2 else {},
     }
+
+
+def _param(o) -> dict[str, Any]:
+    sel = o.type == T_SELECT
+    out = {
+        "p": o.p3,
+        "uid": o.uid,
+        "addr": o.addr,
+        "name": o.name,
+        "group": o.group,
+        "min": 0 if sel else (o.p1 - 65536 if o.p1 > 32767 else o.p1),
+        "max": len(o.options) - 1 if sel else (o.p2 - 65536 if o.p2 > 32767 else o.p2),
+        "dec": 0 if sel else o.flags & 7,
+        "unit": "" if sel else UNIT_LABELS.get(o.flags >> 8, ""),
+        "bool": not sel and (o.flags >> 8) == UNIT_BOOL,
+        "time": not sel and (o.flags >> 8) == UNIT_TIME,
+        "options": o.options if sel else None,
+        # generátor: UID parametru = 30000 + UID objektu·5 + druh (1 max. doba, 2 max. jas, 3 náběh; okruh 1 den, 2 noc, 3 záloha)
+        "target": (o.uid - 30000) // 5 if o.uid > 30000 else 0,
+        "kind": (o.uid - 30000) % 5 if o.uid > 30000 else 0,
+    }
+    for sec, base in TECH_PARAM_BASES.items():  # technologie: sekce a číslo parametru
+        if base <= o.uid < base + 50:
+            out["tech"], out["n"] = sec, o.uid - base
+    return out
+
+
+def _tech(coord) -> dict[str, Any]:
+    """Technologie (topení, TUV, bazén): role výstupů a teplot podle meta p3, stavové objekty."""
+    d = coord.desc
+    outs = {}
+    circuits = []
+    for o in d.objects_of(T_LIGHT, T_SWITCH):
+        role = ROLE_OUT.get(o.p3) if d.protocol >= 2 else None
+        if role == "circuit":
+            circuits.append({"uid": o.uid, "name": o.name, "group": o.group, "addr": o.addr, "temp": o.p1})
+        elif role:
+            outs.setdefault(role, []).append(
+                {"uid": o.uid, "name": o.name, "group": o.group, "addr": o.addr, "circuit": o.p1}
+            )
+    temps = {
+        ROLE_TEMP[o.p3]: {"uid": o.uid, "name": o.name, "addr": o.addr}
+        for o in d.objects_of(T_TEMP)
+        if o.p3 in ROLE_TEMP
+    }
+    state = {
+        o.uid: {"uid": o.uid, "name": o.name, "addr": o.addr, "options": o.options}
+        for o in d.objects_of(T_SELECT)
+        if o.flags & F_READONLY
+    }
+    extra = {o.uid: {"uid": o.uid, "name": o.name, "addr": o.addr} for o in d.objects_of(T_VALUE, T_ACTION) if 7000 <= o.uid < 7100}
+    return {"outputs": outs, "circuits": circuits, "temps": temps, "states": state, "extra": extra}
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/config/get", vol.Required("entry_id"): str})
@@ -178,7 +222,53 @@ async def ws_config_get(hass, coord, msg) -> dict[str, Any]:
     }
     lux = next((o for o in vals if o.p3 == 7), None)  # třída illuminance
     cfg["lux"] = coord.get_value(lux.addr, lux.flags) if lux else None
+    cfg["live"] = _live(coord)
     return cfg
+
+
+def _live(coord) -> dict[str, Any]:
+    """Aktuální hodnoty registrů objektů podle adresy (panel: stavy technologie)."""
+    out: dict[str, Any] = {"ha_online": coord.status(S_HA_ONLINE)}
+    for o in coord.desc.objects:
+        if o.type == T_TEMP:
+            out[str(o.addr)] = coord.get_signed(o.addr + 1)
+        elif o.type == T_VALUE:
+            out[str(o.addr)] = coord.get_value(o.addr, o.flags)
+        else:
+            out[str(o.addr)] = coord.get(o.addr)
+    return out
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/live",
+        vol.Required("entry_id"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_with_coordinator
+async def ws_live(hass, coord, msg) -> dict[str, Any]:
+    """Jen aktuální hodnoty z posledního čtení (bez čtení konfigurace), panel je obnovuje periodicky."""
+    return _live(coord)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/press",
+        vol.Required("entry_id"): str,
+        vol.Required("addr"): int,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_with_coordinator
+async def ws_press(hass, coord, msg) -> dict[str, Any]:
+    """Akce PLC (typ ACTION): zápis 1 do registru akce."""
+    if not any(o.addr == msg["addr"] for o in coord.desc.objects_of(T_ACTION)):
+        raise ValueError("Neznámá akce")
+    await coord.write_register(msg["addr"], 1)
+    return {"ok": True}
 
 
 @websocket_api.websocket_command(
@@ -283,6 +373,8 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_entries,
         ws_info,
         ws_config_get,
+        ws_live,
+        ws_press,
         ws_config_set,
         ws_versions_list,
         ws_versions_save,

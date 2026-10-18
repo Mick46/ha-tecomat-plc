@@ -61,13 +61,24 @@ T_DIMMER = 7  # stmívač: +0 žádaný jas 0–100 (zápis z HA), +1 skutečný
 T_COVER = 8   # žaluzie/markýza: +0 povel (1 otevřít, 2 zavřít, 3 stop, 4 na polohu), +1 cílová poloha, +2 poloha, +3 lamely, +4 pohyb; p1 UID výstupu dolů; flags bit0 = lamely
 T_GATE = 9    # vrata: +0 povel (1 otevřít, 2 zavřít, 3 impulz), +1 stav (1 otevřeno)
 T_NUMBER = 10 # parametr v PLC: +0 hodnota; p1 min, p2 max, p3 index (schránka 20000+p3); flags bity 0–2 desetinná místa, 8–15 jednotka
+T_SELECT = 11 # volba: +0 index volby; p1 řetězec „A|B|C“, p2 počet, p3 index parametru; flags 0x20 = jen stav (ne parametr)
+T_ACTION = 12 # akce: +0 povel (zápis 1, PLC vynuluje)
 
 F_VALUE_SET = 0x04     # VALUE: čítač nastavitelný z panelu (schránka 9000 + 2·i nižší, +1 vyšší slovo)
 AUTO_INDEX_BASE = 4000
 AUTO_REGS = 20
 GAS_INDEX_BASE = 9000
 UNIT_BOOL = 11
-F_PARAM_ENTITY = 0x10  # NUMBER: zobrazit jako entitu (jinak jen v panelu)
+F_PARAM_ENTITY = 0x10  # NUMBER/SELECT: zobrazit jako entitu (jinak jen v panelu)
+F_READONLY = 0x20      # LIGHT/SWITCH: řídí logika PLC (v HA binary_sensor); SELECT: jen stav
+UNIT_TIME = 13         # parametr: minuty od půlnoci (panel hh:mm)
+
+# role technologie (meta p3): výstupy a teploty
+ROLE_OUT = {1: "kotel", 2: "heads", 3: "pump", 4: "tuv", 5: "pool_filter", 6: "pool_heat", 7: "circuit"}
+ROLE_TEMP = {1: "outdoor", 2: "tuv_top", 3: "tuv_bottom", 4: "pool"}
+# technologie: parametr n má UID 30000 + base·5 + n
+TECH_PARAM_BASES = {"heat": 65000, "tuv": 65050, "pool": 65100}
+TECH_HEAT_STATUS, TECH_TUV_STATUS, TECH_TUV_DAYS, TECH_TUV_ACTION = 7000, 7010, 7011, 7012
 
 # podtyp výstupu (protokol 2, meta p2 u LIGHT/SWITCH/DIMMER)
 SUBTYPES = {
@@ -102,4 +113,4 @@ STATIC_URL = "/tecomat_plc_static"
 
 BUTTON_EVENTS = {1: "short", 2: "long", 3: "double"}
 
-PLATFORMS = ["binary_sensor", "button", "cover", "event", "light", "number", "sensor", "switch"]
+PLATFORMS = ["binary_sensor", "button", "cover", "event", "light", "number", "select", "sensor", "switch"]

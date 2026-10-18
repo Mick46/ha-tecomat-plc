@@ -5,6 +5,7 @@
 //
 // Data přes websocket API integrace:
 //   tecomat_plc/entries, /info (protokol 1: matice, 2: akce tlačítek), /config/get, /config/set,
+//   /live (aktuální hodnoty), /press (akce PLC),
 //   /versions/list, /versions/save, /versions/restore, /versions/delete, /versions/import
 //
 // PLC je zdroj pravdy: konfigurace se čte z PLC, verze se ukládají ručně.
@@ -246,6 +247,29 @@ const STYLE_V2 = `
   .col2 { display: flex; flex-direction: column; gap: 6px; }
   .win { display: flex; align-items: center; gap: 6px; }
   .vers { max-width: 900px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  .tech { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; align-items: start; }
+  .tech.narrow { grid-template-columns: 1fr; }
+  .tech .wide { grid-column: 1 / -1; }
+  .tech .trow { display: grid; grid-template-columns: minmax(150px, 210px) 1fr; align-items: center; gap: 12px; padding: 6px 16px;
+    border-top: 1px solid var(--divider-color); }
+  .tech .trow > span:first-child { color: var(--secondary-text-color); }
+  .tech .trow .pf { margin: 0 12px 0 0; }
+  .tech input[type=time], .tech select { height: 34px; border-radius: 8px; border: 1px solid var(--divider-color); padding: 0 6px; font: inherit;
+    background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .seg { display: inline-flex; border: 1px solid var(--divider-color); border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+  .seg button { background: transparent; color: var(--primary-text-color); border: 0; padding: 7px 14px; cursor: pointer; font: inherit; }
+  .seg button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .seg button[disabled] { cursor: default; opacity: .6; }
+  .tchips { display: flex; gap: 20px; flex-wrap: wrap; padding: 6px 16px 12px; }
+  .tchip { display: flex; flex-direction: column; min-width: 100px; }
+  .tchip span { color: var(--secondary-text-color); font-size: 12px; }
+  .tchip b { font-size: 20px; font-weight: 400; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--disabled-text-color, #888); margin-right: 6px; vertical-align: middle; }
+  .dot.on { background: var(--state-climate-heat-color, #ff8100); box-shadow: 0 0 6px var(--state-climate-heat-color, #ff8100); }
+  .badge { margin-left: auto; font-size: 12px; padding: 3px 10px; border-radius: 12px; background: var(--secondary-background-color);
+    color: var(--secondary-text-color); font-weight: 400; }
+  .badge.on { color: var(--success-color, #43a047); }
+  .badge.warn { color: var(--warning-color, #ffa600); }
 `;
 
 class TecomatPlcPanel extends HTMLElement {
@@ -274,6 +298,12 @@ class TecomatPlcPanel extends HTMLElement {
     this._setRoom = null;
     this._auto = null;
     this._autoDraft = null;
+    this._live = null;
+    this._liveTimer = null;
+  }
+
+  disconnectedCallback() {
+    this._stopLive();
   }
 
   set hass(h) {
@@ -602,7 +632,8 @@ class TecomatPlcPanel extends HTMLElement {
 
   _tabSet(ready) {
     const info = this._info;
-    const params = info.params || [];
+    const circ = new Set(((info.tech || {}).circuits || []).map((c) => c.uid));
+    const params = (info.params || []).filter((p) => !p.tech && !circ.has(p.target));  // ty jsou v záložce Technologie
     const objByUid = {};
     for (const t of info.targets) if (t.obj === t.uid) objByUid[t.uid] = t;
     // parametry podle objektu; bez objektu (např. signalizace na vypínači) zvlášť
@@ -680,6 +711,157 @@ class TecomatPlcPanel extends HTMLElement {
         <div class="scroll"><table>${mrows}</table></div>
         <div class="note">Stav nastavte podle fyzického plynoměru (nebo podle čítače v původním programu CP-2000). Dál ho PLC počítá samo i bez Home Assistant.</div></div>`;
     return `<div class="content ${this._narrow ? "narrow" : ""}"><div class="col">${roomCard}</div><div class="col">${main}</div></div>`;
+  }
+
+  _tabList() {
+    const t = [["ctl", "Ovladače"], ["set", "Nastavení"], ["auto", "Automatiky"]];
+    const tech = (this._info && this._info.tech) || {};
+    if ((this._info.params || []).some((p) => p.tech) || (tech.circuits || []).length) t.push(["tech", "Technologie"]);
+    t.push(["ver", "Zálohy"]);
+    return t;
+  }
+
+  // ---------------------------------------------------------------- technologie (topení, teplá voda, bazén)
+  _startLive() {
+    if (this._liveTimer) return;
+    const tick = async () => {
+      try {
+        this._live = await this._ws("live");
+      } catch (e) {
+        return;
+      }
+      // nepřekreslovat, když uživatel zrovna něco vyplňuje
+      const a = this.shadowRoot.activeElement;
+      if (this._tab === "tech" && !this._busy && !this._dialog && !(a && /INPUT|SELECT/.test(a.tagName))) this._render();
+    };
+    this._liveTimer = setInterval(tick, 5000);
+  }
+  _stopLive() {
+    if (this._liveTimer) clearInterval(this._liveTimer);
+    this._liveTimer = null;
+  }
+  async _press(addr, label) {
+    await this._run("Odesílám povel…", async () => {
+      await this._ws("press", { addr });
+      this._msg = `${label}: odesláno do PLC`;
+    });
+  }
+
+  _tabTech(ready) {
+    const info = this._info;
+    const tech = info.tech || {};
+    const live = this._live || (this._cfg && this._cfg.live) || {};
+    const dis = ready ? "" : "disabled";
+    const tp = (sec, n) => (info.params || []).find((p) => p.tech === sec && p.n === n);
+    const val = (p) => (p && this._cfg ? this._paramValue(p) : null);
+    const lv = (addr) => (addr === undefined || addr === null ? null : live[String(addr)]);
+    const temp = (t) => {
+      const v = t ? lv(t.addr) : null;
+      return v === null || v === undefined || v <= -999 ? "–" : `${(v / 10).toFixed(1)} °C`;
+    };
+    const tempOf = (uid) => (info.temps || []).find((t) => t.uid === uid);
+    const hhmm = (m) => (m === null ? "" : `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+    const field = (p, label, opts = {}) => {
+      if (!p) return "";
+      if (p.options) {
+        const v = val(p);
+        if (opts.dropdown)
+          return `<select data-sel="${p.p}" ${dis}>${p.options.map((o, i) => `<option value="${i}" ${v === i ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+        return `<div class="seg">${p.options.map((o, i) => `<button data-sel="${p.p}" data-v="${i}" class="${v === i ? "on" : ""}" ${dis}>${esc(o)}</button>`).join("")}</div>`;
+      }
+      if (p.bool)
+        return `<label class="pf"><input type="checkbox" data-parb="${p.p}" ${val(p) ? "checked" : ""} ${dis}>${label ? ` ${esc(label)}` : ""}</label>`;
+      if (p.time) return `<input type="time" data-part="${p.p}" value="${hhmm(val(p))}" ${dis}>`;
+      return `<label class="pf">${label ? `<span>${esc(label)}</span>` : ""}<input class="num" data-par="${p.p}" type="number" step="${1 / 10 ** p.dec}"
+        min="${p.min / 10 ** p.dec}" max="${p.max / 10 ** p.dec}" value="${val(p) ?? ""}" ${dis}><span class="unit">${esc(p.unit)}</span></label>`;
+    };
+    const row = (label, html) => (html ? `<div class="trow"><span>${esc(label)}</span><span>${html}</span></div>` : "");
+    const onOff = (o, on = "běží", off = "stojí") => {
+      const v = lv(o.addr);
+      return `<div class="tchip"><span>${esc(o.name)}</span><b><span class="dot ${v ? "on" : ""}"></span>${v === null || v === undefined ? "–" : v ? on : off}</b></div>`;
+    };
+    const state = (uid) => {
+      const s = (tech.states || {})[uid];
+      const v = s ? lv(s.addr) : null;
+      return s && v !== null && v !== undefined ? s.options[v] || "" : "";
+    };
+    const outs = tech.outputs || {};
+    const T = tech.temps || {};
+    const cards = [];
+
+    // topení
+    if (tp("heat", 0)) {
+      const st = state(7000);
+      const cls = st === "Řídí HA" ? "on" : st === "Záloha PLC" ? "warn" : "";
+      const chips = [...(outs.kotel || []), ...(outs.heads || []), ...(outs.pump || [])].map((o) => onOff(o)).join("");
+      cards.push(`<div class="card"><div class="card-header">${icon("mdi:radiator")}Topení<span class="badge ${cls}">${esc(st || "–")}</span></div>
+        ${row("Režim", field(tp("heat", 0)))}
+        ${row("Auto: topit, když je venku pod", field(tp("heat", 1)) + (T.outdoor ? `<span class="secondary">teď venku ${temp(T.outdoor)}</span>` : ""))}
+        ${row("Hystereze venku", field(tp("heat", 2)))}
+        ${row("Záloha PLC po výpadku HA", field(tp("heat", 3)))}
+        ${row("Den od / noc od", field(tp("heat", 4)) + " " + field(tp("heat", 5)))}
+        ${row("Hystereze v místnosti", field(tp("heat", 6)))}
+        ${row("Kotel min. běh / pauza", field(tp("heat", 7)) + field(tp("heat", 8)))}
+        <div class="tchips">${chips}</div>
+        <div class="note">Kotel běží, když chce topit aspoň jeden okruh. S ním se zapne napájení hlavic, s podlahovkou čerpadlo.
+          Když Home Assistant neodpovídá déle než nastavenou dobu, řídí okruhy PLC podle teplot den / noc.</div></div>`);
+    }
+    // teplá voda
+    if (tp("tuv", 0)) {
+      const ex = tech.extra || {};
+      const days = ex[7011] ? lv(ex[7011].addr) : null;
+      const act = ex[7012];
+      const fc = tp("tuv", 5);
+      const gas = (outs.tuv || []).map((o) => lv(o.addr)).some((v) => v);
+      cards.push(`<div class="card"><div class="card-header">${icon("mdi:water-boiler")}Teplá voda<span class="badge ${gas ? "on" : ""}">${gas ? "ohřívá plyn" : "plyn neohřívá"}</span></div>
+        <div class="tchips">
+          ${T.tuv_top ? `<div class="tchip"><span>Bojler nahoře</span><b>${temp(T.tuv_top)}</b></div>` : ""}
+          ${T.tuv_bottom ? `<div class="tchip"><span>Bojler dole</span><b>${temp(T.tuv_bottom)}</b></div>` : ""}
+          ${fc ? `<div class="tchip"><span>Předpověď FVE</span><b>${val(fc) === null ? "–" : val(fc).toFixed(1) + " kWh"}</b></div>` : ""}
+        </div>
+        ${row("Režim plynu", field(tp("tuv", 0)))}
+        ${row("Teď platí", esc(state(7010) || "–"))}
+        ${row("Léto min / max", field(tp("tuv", 1)) + field(tp("tuv", 2)))}
+        ${row("Zima min / max", field(tp("tuv", 3)) + field(tp("tuv", 4)))}
+        ${row("Léto: předpověď stačí od", field(tp("tuv", 6)))}
+        ${row("Dezinfekce", field(tp("tuv", 7)) + field(tp("tuv", 9), "každých"))}
+        ${row("Splněno, když je dole", field(tp("tuv", 8)))}
+        ${row("Kdy spustit", field(tp("tuv", 10), "", { dropdown: true }) + " " + field(tp("tuv", 11)))}
+        ${row("Od poslední dezinfekce", (days === null || days === undefined ? "–" : `${(days / 10).toFixed(1)} dne`) +
+          (act ? ` <button class="btn outlined" data-press="${act.addr}" data-label="Dezinfekce" ${dis}>${icon("mdi:play")}Dezinfikovat teď</button>` : ""))}
+        <div class="note">Plyn ohřívá horní polovinu bojleru podle horního čidla. V létě jen jako záloha, když předpověď FVE (posílá Home Assistant) nestačí.
+          Dezinfekce se spustí v nastavený den a čas, jen když voda dole za poslední interval nedosáhla teploty „splněno“.</div></div>`);
+    }
+    // okruhy
+    const circuits = [...(tech.circuits || [])].sort((a, b) => this._groupName(a.group).localeCompare(this._groupName(b.group), "cs"));
+    if (circuits.length) {
+      const cp = (c, kind) => (info.params || []).find((p) => p.target === c.uid && p.kind === kind);
+      const rows = circuits
+        .map((c) => {
+          const on = lv(c.addr);
+          return `<tr><td class="left">${esc(this._groupName(c.group))}</td><td class="bigtd">${temp(tempOf(c.temp))}</td>
+            <td>${field(cp(c, 1))}</td><td>${field(cp(c, 2))}</td><td>${field(cp(c, 3))}</td>
+            <td><span class="dot ${on ? "on" : ""}"></span>${on === null || on === undefined ? "–" : on ? "topí" : "netopí"}</td></tr>`;
+        })
+        .join("");
+      const backup = state(7000) === "Záloha PLC";
+      cards.push(`<div class="card wide"><div class="card-header">${icon("mdi:home-thermometer")}Okruhy
+          <span class="badge ${backup ? "warn" : ""}">${backup ? "řídí záloha PLC" : "řídí Home Assistant (VTherm), PLC jako záloha"}</span></div>
+        <div class="scroll"><table><tr><th class="left">Místnost</th><th>Teplota</th><th>Den</th><th>Noc</th><th>V záloze</th><th>Okruh</th></tr>${rows}</table></div>
+        <div class="note">Teploty den / noc platí jen pro zálohu v PLC. Běžně topí podle VTherm v Home Assistant (plány, okna, nepřítomnost).</div></div>`);
+    }
+    // bazén
+    if (tp("pool", 0)) {
+      const chips = [...(outs.pool_filter || []), ...(outs.pool_heat || [])].map((o) => onOff(o)).join("");
+      cards.push(`<div class="card"><div class="card-header">${icon("mdi:pool")}Bazén</div>
+        <div class="tchips">${T.pool ? `<div class="tchip"><span>Voda</span><b>${temp(T.pool)}</b></div>` : ""}${chips}</div>
+        ${row("Filtrace", field(tp("pool", 0)))}
+        ${row("Auto: od / do", field(tp("pool", 1)) + " " + field(tp("pool", 2)))}
+        ${row("Ohřev tepelným čerpadlem", field(tp("pool", 3), "zapnuto"))}
+        ${row("Ohřev min / max", field(tp("pool", 4)) + field(tp("pool", 5)))}
+        <div class="note">Tepelné čerpadlo běží jen při běžící filtraci.</div></div>`);
+    }
+    return `${this._alerts(false)}<div class="tech ${this._narrow ? "narrow" : ""}">${cards.join("")}</div>`;
   }
 
   async _setMeter(m, input) {
@@ -826,7 +1008,10 @@ class TecomatPlcPanel extends HTMLElement {
         ? `<select id="entry">${this._entries.map((e) => `<option value="${e.entry_id}" ${e.entry_id === this._entry ? "selected" : ""}>${esc(e.title)}</option>`).join("")}</select>`
         : "";
     const body =
-      tab === "set" ? this._tabSet(ready) : tab === "ver" ? this._tabVer(ready) : tab === "auto" ? this._tabAuto(ready) : this._tabCtl(ready);
+      tab === "set" ? this._tabSet(ready) : tab === "ver" ? this._tabVer(ready) : tab === "auto" ? this._tabAuto(ready)
+        : tab === "tech" ? this._tabTech(ready) : this._tabCtl(ready);
+    if (tab === "tech") this._startLive();
+    else this._stopLive();
     const dlg = this._dialog
       ? `<div class="backdrop" id="dlg-bg"><div class="dialog" role="dialog">
           <h2>${esc(this._dialog.title)}</h2>
@@ -840,7 +1025,7 @@ class TecomatPlcPanel extends HTMLElement {
       <div class="toolbar">
         <ha-menu-button></ha-menu-button>
         <div class="title2">Tecomat PLC <span style="opacity:.7;font-size:14px">${esc(info.model)} · program ${info.program}</span></div>
-        <div class="tabs">${[["ctl", "Ovladače"], ["set", "Nastavení"], ["auto", "Automatiky"], ["ver", "Zálohy"]].map(([t, l]) => `<button data-tab="${t}" class="${tab === t ? "on" : ""}">${l}</button>`).join("")}</div>
+        <div class="tabs">${this._tabList().map(([t, l]) => `<button data-tab="${t}" class="${tab === t ? "on" : ""}">${l}</button>`).join("")}</div>
         <div style="flex:1"></div>
         ${this._statusIcons()}
         ${entrySel}
@@ -910,6 +1095,24 @@ class TecomatPlcPanel extends HTMLElement {
         if (p) this._saveParam(p, el.checked ? 1 : 0);
       })
     );
+    on(".seg button[data-sel]:not([disabled])", (el) => {
+      const p = this._info.params.find((x) => x.p === Number(el.dataset.sel));
+      if (p) this._saveParam(p, Number(el.dataset.v));
+    });
+    root.querySelectorAll("select[data-sel]").forEach((el) =>
+      el.addEventListener("change", () => {
+        const p = this._info.params.find((x) => x.p === Number(el.dataset.sel));
+        if (p) this._saveParam(p, Number(el.value));
+      })
+    );
+    root.querySelectorAll("input[data-part]").forEach((el) =>
+      el.addEventListener("change", () => {
+        const p = this._info.params.find((x) => x.p === Number(el.dataset.part));
+        const m = /^(\d\d):(\d\d)/.exec(el.value);
+        if (p && m) this._saveParam(p, Number(m[1]) * 60 + Number(m[2]));
+      })
+    );
+    on("button[data-press]:not([disabled])", (el) => this._press(Number(el.dataset.press), el.dataset.label));
     on("button[data-meter]:not([disabled])", (el) => {
       const m = this._info.meters.find((x) => x.i === Number(el.dataset.meter));
       if (m) this._setMeter(m, root.getElementById(`meter-${m.i}`).value);

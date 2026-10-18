@@ -35,8 +35,18 @@ OBJECTS2 = [
     (5, 2, 30317, 0, 6, 0, 0, 216, "Vchod"),              # pohyb
     (6, 2, 30318, 2, 8, 8, 1 | 2 | 4, 241, "Plyn"),       # plynoměr (32 bit, nastavitelný)
     (10, 2, 30320, 0, 1, 2, 11 << 8, 40455, "Levý signalizace vrat"),  # parametr ano/ne (bez objektu)
+    # část 3: technologie
+    (2, 1, 30321, 0, 7, 1, 0x20, 227, "Kotel"),                    # výstup jen ke čtení, role kotel
+    (11, 1, 30322, "O0", 3, 3, 0x10, 65000, "Topení režim"),       # volba = parametr 3, entita
+    (11, 1, 30323, "O1", 4, 0, 0x20, 7000, "Topení stav"),         # stav (jen ke čtení)
+    (12, 1, 30324, 0, 0, 0, 0, 7012, "Teplá voda dezinfikovat"),   # akce
+    (10, 2, 30325, 0, 1, 4, (11 << 8) | 0x10, 65103, "Bazén ohřev"),  # parametr ano/ne jako entita (switch)
 ]
 AUTO_NAMES = ["PIR vstup"]
+OPTIONS = ["Vypnuto|Zapnuto|Auto", "Vyp|Teplo|Řídí HA|Záloha"]  # simulátor má kratší řetězce než PLC
+OPT_OFS = OBJ_OFS + len(OBJECTS2) + len(AUTO_NAMES)
+OBJECTS2 = [tuple(OPT_OFS + int(x[1:]) if isinstance(x, str) and x[:1] == "O" and x[1:].isdigit() else x for x in o)
+            for o in OBJECTS2]
 
 
 class MockPlcV2(MockPlc):
@@ -62,11 +72,16 @@ class MockPlcV2(MockPlc):
             self._put_string(STRS, OBJ_OFS + i, o[8])
         for i, n in enumerate(AUTO_NAMES):
             self._put_string(STRS, OBJ_OFS + len(self.objects) + i, n)
+        for i, n in enumerate(OPTIONS):
+            self._put_string(STRS, OPT_OFS + i, n)
         # výchozí konfigurace: tlačítko 0 krátce přepne bodovky, dlouze stmívač na 50 %
         self.box.update({0: 20, 1: 1 * 256, 8: 2, 9: 4 * 256 + 50})
         self.box[20000] = 0
         self.box[20001] = 20
         self.box[20002] = 1
+        self.box[20003] = 2      # režim topení Auto
+        self.box[20004] = 0      # ohřev bazénu vypnut
+        self.presses = 0
         self.box.update({4000: 1, 4001: 216, 4006: 20, 4007: 400, 4016: 20})
         for r in range(8, 16):
             self.box[4000 + r] = 0xFFFF
@@ -127,4 +142,12 @@ class MockPlcV2(MockPlc):
             self.gate_open = {1: 1, 2: 0, 3: 1 - self.gate_open}[r[30315]]
         r[30315] = 0
         r[30316] = self.gate_open
+        # technologie: kotel běží v režimu Zapnuto, stav „Řídí HA“, akce se spočítá a vynuluje
+        r[30322] = self.box.get(20003, 0)
+        r[30325] = self.box.get(20004, 0)
+        r[30321] = 1 if r[30322] == 1 else 0
+        r[30323] = 2 if r[30322] else 0
+        if r.get(30324, 0) == 1:
+            self.presses += 1
+        r[30324] = 0
         r[STATUS + 4] = 1 if r.get(STATUS + 0, 0) else 0

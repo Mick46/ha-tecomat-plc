@@ -451,7 +451,12 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         assert [x["uid"] for x in info["sensors"]] == [216]
         assert info["autos"] == [{"a": 0, "name": "PIR vstup"}]
         assert info["meters"][0]["uid"] == 241
-        assert [p["bool"] for p in info["params"]] == [False, False, True]
+        assert [p["bool"] for p in info["params"]] == [False, False, True, False, True]
+        sel = next(p for p in info["params"] if p["uid"] == 65000)
+        assert sel["options"] == ["Vypnuto", "Zapnuto", "Auto"] and sel["tech"] == "heat" and sel["n"] == 0
+        assert info["tech"]["outputs"]["kotel"][0]["uid"] == 227
+        assert info["tech"]["states"]["7000"]["options"][2] == "Řídí HA"
+        assert 227 not in {t["uid"] for t in info["targets"]}  # výstup řízený PLC není cíl tlačítek
         await ws.send_json({"id": 8, "type": f"{DOMAIN}/config/get", "entry_id": entry.entry_id})
         cfg = (await ws.receive_json())["result"]
         assert cfg["map"]["4001"] == 216 and cfg["map"]["4016"] == 20
@@ -462,6 +467,39 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
                             "pairs": [[9000, 1250000 % 65536], [9001, 1250000 // 65536]]})
         assert (await ws.receive_json())["success"]
         assert plc.gas == 1250000
+
+        # část 3: volba režimu, stav, kotel jen ke čtení, parametr ano/ne jako switch, akce
+        assert ent.async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_227") is None
+        kotel = ent.async_get_entity_id("binary_sensor", DOMAIN, f"{entry.entry_id}_227")
+        mode = ent.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_65000")
+        state = ent.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_7000")
+        assert hass.states.get(mode).state == "Auto"
+        assert hass.states.get(state).state == "Řídí HA"
+        assert hass.states.get(kotel).state == "off"
+        await hass.services.async_call("select", "select_option", {"entity_id": mode, "option": "Zapnuto"}, blocking=True)
+        assert plc.box[20003] == 1
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(mode).state == "Zapnuto"
+        assert hass.states.get(kotel).state == "on"
+        pool = ent.async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_65103")
+        assert ent.async_get_entity_id("number", DOMAIN, f"{entry.entry_id}_65103") is None
+        await hass.services.async_call("switch", "turn_on", {"entity_id": pool}, blocking=True)
+        assert plc.box[20004] == 1
+        dis = ent.async_get_entity_id("button", DOMAIN, f"{entry.entry_id}_7012")
+        await hass.services.async_call("button", "press", {"entity_id": dis}, blocking=True)
+        await coord.async_refresh()
+        assert plc.presses == 1
+        await ws.send_json({"id": 10, "type": f"{DOMAIN}/press", "entry_id": entry.entry_id, "addr": 30324})
+        assert (await ws.receive_json())["success"]
+        await coord.async_refresh()
+        assert plc.presses == 2
+        await ws.send_json({"id": 11, "type": f"{DOMAIN}/live", "entry_id": entry.entry_id})
+        live = (await ws.receive_json())["result"]
+        assert live["30321"] == 1 and live["30323"] == 2
+        await ws.send_json({"id": 12, "type": f"{DOMAIN}/config/get", "entry_id": entry.entry_id})
+        cfg = (await ws.receive_json())["result"]
+        assert cfg["map"]["20003"] == 1 and cfg["checksum_plc"] == cfg["checksum_calc"]
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await plc.stop()
