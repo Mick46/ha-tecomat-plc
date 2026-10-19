@@ -37,7 +37,7 @@ const STYLE = `
     --tp-tint: color-mix(in srgb, var(--primary-color) 14%, transparent);
   }
   .toolbar {
-    position: sticky; top: 0; z-index: 2;
+    position: sticky; top: 0; z-index: 10;
     display: flex; align-items: center; gap: 8px;
     height: var(--header-height, 56px); padding: 0 12px 0 4px; box-sizing: border-box;
     background: var(--app-header-background-color, var(--primary-color));
@@ -253,10 +253,10 @@ const STYLE_V2 = `
   .col2 { display: flex; flex-direction: column; gap: 6px; }
   .win { display: flex; align-items: center; gap: 6px; }
   .vers { max-width: 900px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
-  .tech { columns: 2; column-gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; }
-  .tech.narrow { columns: 1; }
-  .tech > .card { break-inside: avoid; margin-bottom: 16px; display: inline-block; width: 100%; }
-  .tech > .card.wide { column-span: all; display: block; }
+  .tech { display: flex; flex-direction: column; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; }
+  .tech .tcols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  .tech.narrow .tcols { grid-template-columns: 1fr; }
+  .tech .tcol { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
   .tech .trow { display: grid; grid-template-columns: minmax(150px, 210px) 1fr; align-items: center; gap: 12px; padding: 6px 16px;
     border-top: 1px solid var(--divider-color); }
   .tech .trow > span:first-child { color: var(--secondary-text-color); }
@@ -818,14 +818,14 @@ class TecomatPlcPanel extends HTMLElement {
     };
     const outs = tech.outputs || {};
     const T = tech.temps || {};
-    const cards = [];
+    const C = {};
 
     // topení
     if (tp("heat", 0)) {
       const st = state(7000);
       const cls = st === "Řídí HA" ? "on" : st === "Záloha PLC" ? "warn" : "";
       const chips = [...(outs.kotel || []), ...(outs.heads || []), ...(outs.pump || [])].map((o) => onOff(o)).join("");
-      cards.push(`<div class="card"><div class="card-header">${icon("mdi:radiator")}Topení<span class="badge ${cls}">${esc(st || "–")}</span></div>
+      C.heat = (`<div class="card"><div class="card-header">${icon("mdi:radiator")}Topení<span class="badge ${cls}">${esc(st || "–")}</span></div>
         ${row("Režim", field(tp("heat", 0)))}
         ${row("Auto: topit, když je venku pod", field(tp("heat", 1)) + (T.outdoor ? `<span class="secondary">teď venku ${temp(T.outdoor)}</span>` : ""))}
         ${row("Hystereze venku", field(tp("heat", 2)))}
@@ -844,7 +844,7 @@ class TecomatPlcPanel extends HTMLElement {
       const act = ex[7012];
       const fc = tp("tuv", 5);
       const gas = (outs.tuv || []).map((o) => lv(o.addr)).some((v) => v);
-      cards.push(`<div class="card"><div class="card-header">${icon("mdi:water-boiler")}Teplá voda<span class="badge ${gas ? "on" : ""}">${gas ? "ohřívá plyn" : "plyn neohřívá"}</span></div>
+      C.tuv = (`<div class="card"><div class="card-header">${icon("mdi:water-boiler")}Teplá voda<span class="badge ${gas ? "on" : ""}">${gas ? "ohřívá plyn" : "plyn neohřívá"}</span></div>
         <div class="tchips">
           ${T.tuv_top ? `<div class="tchip"><span>Bojler nahoře</span><b>${temp(T.tuv_top)}</b></div>` : ""}
           ${T.tuv_bottom ? `<div class="tchip"><span>Bojler dole</span><b>${temp(T.tuv_bottom)}</b></div>` : ""}
@@ -876,7 +876,7 @@ class TecomatPlcPanel extends HTMLElement {
         })
         .join("");
       const backup = state(7000) === "Záloha PLC";
-      cards.push(`<div class="card wide"><div class="card-header">${icon("mdi:home-thermometer")}Okruhy
+      C.zones = (`<div class="card wide"><div class="card-header">${icon("mdi:home-thermometer")}Okruhy
           <span class="badge ${backup ? "warn" : ""}">${backup ? "řídí záloha PLC" : "řídí Home Assistant (VTherm), PLC jako záloha"}</span></div>
         <div class="scroll"><table><tr><th class="left">Místnost</th><th>Teplota</th><th>Den</th><th>Noc</th><th>V záloze</th><th>Okruh</th></tr>${rows}</table></div>
         <div class="note">Teploty den / noc platí jen pro zálohu v PLC. Běžně topí podle VTherm v Home Assistant (plány, okna, nepřítomnost).</div></div>`);
@@ -884,7 +884,7 @@ class TecomatPlcPanel extends HTMLElement {
     // bazén
     if (tp("pool", 0)) {
       const chips = [...(outs.pool_filter || []), ...(outs.pool_heat || [])].map((o) => onOff(o)).join("");
-      cards.push(`<div class="card"><div class="card-header">${icon("mdi:pool")}Bazén</div>
+      C.pool = (`<div class="card"><div class="card-header">${icon("mdi:pool")}Bazén</div>
         <div class="tchips">${T.pool ? `<div class="tchip"><span>Voda</span><b>${temp(T.pool)}</b></div>` : ""}${chips}</div>
         ${row("Filtrace", field(tp("pool", 0)))}
         ${row("Auto: od / do", field(tp("pool", 1)) + " " + field(tp("pool", 2)))}
@@ -915,7 +915,7 @@ class TecomatPlcPanel extends HTMLElement {
             <span style="display:block;height:100%;width:${d || 0}%;background:var(--primary-color)"></span></span>${d === null ? "–" : d + " %"}</td></tr>`;
         })
         .join("");
-      cards.push(`<div class="card"><div class="card-header">${icon("mdi:solar-power-variant")}Bojler z přebytků FVE<span class="badge ${cls}">${esc(st || "–")}</span></div>
+      C.fve = (`<div class="card"><div class="card-header">${icon("mdi:solar-power-variant")}Bojler z přebytků FVE<span class="badge ${cls}">${esc(st || "–")}</span></div>
         <div class="tchips">
           ${T.tuv_bottom ? `<div class="tchip"><span>Bojler dole</span><b>${temp(T.tuv_bottom)}</b></div>` : ""}
           ${T.tuv_top ? `<div class="tchip"><span>Bojler nahoře</span><b>${temp(T.tuv_top)}</b></div>` : ""}
@@ -938,7 +938,7 @@ class TecomatPlcPanel extends HTMLElement {
     if (tp("export", 0)) {
       const age = vv("inv_age");
       const ok = age !== null && age < 30;
-      cards.push(`<div class="card"><div class="card-header">${icon("mdi:transmission-tower-export")}Omezení dodávky do sítě
+      C.exp = (`<div class="card"><div class="card-header">${icon("mdi:transmission-tower-export")}Omezení dodávky do sítě
           <span class="badge ${ok ? "on" : "warn"}">${ok ? "střídač · limit " + fmt("explim", 1, "%") : "střídač neodpovídá"}</span></div>
         ${row("Řízení omezení z PLC", field(tp("export", 0), "zapnuto"))}
         ${row("Plný export od baterie", field(tp("export", 1)))}
@@ -949,13 +949,17 @@ class TecomatPlcPanel extends HTMLElement {
           Do střídače se zapisuje jen při změně. Zapněte až po vypnutí automatizace exportu v Home Assistant, jinak by se přetahovaly.</div></div>`);
     }
     if (V.e_imp || V.e_exp) {
-      cards.push(`<div class="card"><div class="card-header">${icon("mdi:meter-electric")}Elektroměr EM03</div>
+      C.em = (`<div class="card"><div class="card-header">${icon("mdi:meter-electric")}Elektroměr EM03</div>
         <div class="scroll"><table><tr><th class="left"></th><th>Celkem</th><th>Dnes</th></tr>
           <tr><td class="left">Odběr</td><td>${fmt("e_imp", 1, "kWh")}</td><td>${fmt("e_imp_day", 2, "kWh")}</td></tr>
           <tr><td class="left">Dodávka</td><td>${fmt("e_exp", 1, "kWh")}</td><td>${fmt("e_exp_day", 2, "kWh")}</td></tr></table></div>
         <div class="note">PLC počítá energii z výkonu fází po fázích jako elektroměr distributora. Stav celkem jde nastavit v záložce Nastavení (Měřidla).</div></div>`);
     }
-    return `${this._alerts(false)}<div class="tech ${this._narrow ? "narrow" : ""}">${cards.join("")}</div>`;
+    // pevné rozložení: Topení | Teplá voda, Okruhy přes celou šířku, Bazén + Bojler | Omezení + Elektroměr
+    const cols = (l, r) => (l.length || r.length ? `<div class="tcols"><div class="tcol">${l.join("")}</div><div class="tcol">${r.join("")}</div></div>` : "");
+    const has = (...k) => k.map((x) => C[x]).filter(Boolean);
+    return `${this._alerts(false)}<div class="tech ${this._narrow ? "narrow" : ""}">
+      ${cols(has("heat"), has("tuv"))}${C.zones || ""}${cols(has("pool", "fve"), has("exp", "em"))}</div>`;
   }
 
   async _setMeter(m, input) {
