@@ -167,12 +167,15 @@ def _groups(hass: HomeAssistant, coord) -> list[dict[str, Any]]:
         if area is None and g.area:
             area = areas.async_get_area_by_name(g.area)
         floor = floors.async_get_floor(area.floor_id) if area and area.floor_id else None
+        if floor is None and g.floor:  # oblast v HA bez podlaží: podlaží z xlsx (podle názvu i úroveň z HA)
+            floor = floors.async_get_floor_by_name(g.floor)
         out.append({
             "id": g.id,
             "name": g.name,
             "area": g.area,
-            "floor": floor.name if floor else None,
+            "floor": floor.name if floor else (g.floor or None),
             "flevel": floor.level if floor else None,
+            "ficon": floor.icon if floor else None,
         })
     return out
 
@@ -182,7 +185,7 @@ def _stale(hass: HomeAssistant, coord) -> tuple[list, list]:
     entry_id = coord.config_entry.entry_id
     ents = [
         e for e in er.async_entries_for_config_entry(er.async_get(hass), entry_id)
-        if e.unique_id not in coord.expected_uids
+        if f"{e.domain}:{e.unique_id}" not in coord.expected_uids
     ]
     groups = {f"{entry_id}_g{g.id}" for g in coord.desc.groups}
     devs = [

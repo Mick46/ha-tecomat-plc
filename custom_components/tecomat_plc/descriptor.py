@@ -11,6 +11,7 @@ from .const import (
     H_AREA_OFS,
     H_AUTO_NAME_OFS,
     H_AUTOS,
+    H_FLOOR_OFS,
     H_GROUPS,
     H_MAGIC,
     H_MAILBOX_BASE,
@@ -40,6 +41,7 @@ class PlcGroup:
     id: int
     name: str
     area: str
+    floor: str = ""  # podlaží z xlsx (generátor), použije se, když oblast v HA podlaží nemá
 
 
 @dataclass
@@ -156,8 +158,9 @@ async def read_descriptor(client) -> Descriptor:
         start = i * sstride + sofs
         return _decode(sraw[start : start + sstride - sofs])
 
+    floor_ofs = hdr[H_FLOOR_OFS] if hdr[H_PROTOCOL] >= 2 else 0
     for g in range(n_groups):
-        desc.groups.append(PlcGroup(g, s(g) or f"Skupina {g}", s(area_ofs + g)))
+        desc.groups.append(PlcGroup(g, s(g) or f"Skupina {g}", s(area_ofs + g), s(floor_ofs + g) if floor_ofs else ""))
 
     desc.autos = [s(auto_ofs + i) or f"Automatika {i + 1}" for i in range(n_autos)]
 

@@ -186,8 +186,10 @@ const STYLE_V2 = `
   .content.three { grid-template-columns: minmax(200px, 240px) minmax(260px, 320px) 1fr; }
   .content.three.narrow { grid-template-columns: 1fr; }
   .item .count { margin-left: auto; font-size: 12px; color: var(--secondary-text-color); }
-  .floor { padding: 10px 16px 2px; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em;
-    color: var(--secondary-text-color); }
+  .floor { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 16px; font-size: 14px; font-weight: 500;
+    color: var(--primary-color); background: var(--secondary-background-color); border-top: 1px solid var(--divider-color);
+    border-bottom: 1px solid var(--divider-color); }
+  .floor ha-icon { --mdc-icon-size: 18px; }
   .stale { padding: 2px 16px; font-size: 13px; }
   .stale code { color: var(--secondary-text-color); }
   .sw { padding: 12px 16px 16px; border-top: 1px solid var(--divider-color); }
@@ -251,9 +253,10 @@ const STYLE_V2 = `
   .col2 { display: flex; flex-direction: column; gap: 6px; }
   .win { display: flex; align-items: center; gap: 6px; }
   .vers { max-width: 900px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
-  .tech { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; align-items: start; }
-  .tech.narrow { grid-template-columns: 1fr; }
-  .tech .wide { grid-column: 1 / -1; }
+  .tech { columns: 2; column-gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; }
+  .tech.narrow { columns: 1; }
+  .tech > .card { break-inside: avoid; margin-bottom: 16px; display: inline-block; width: 100%; }
+  .tech > .card.wide { column-span: all; display: block; }
   .tech .trow { display: grid; grid-template-columns: minmax(150px, 210px) 1fr; align-items: center; gap: 12px; padding: 6px 16px;
     border-top: 1px solid var(--divider-color); }
   .tech .trow > span:first-child { color: var(--secondary-text-color); }
@@ -1327,14 +1330,17 @@ class TecomatPlcPanel extends HTMLElement {
   }
   // místnosti podle podlaží v HA (úroveň, bez podlaží na konec) a uvnitř abecedně
   _sortRooms(rooms) {
-    const lvl = (g) => (g.flevel === null || g.flevel === undefined ? (g.floor ? 900 : 999) : g.flevel);
+    // venkovní podlaží vždy na konec (za patra), místnosti bez podlaží úplně na konec
+    const out = (g) => /venk|outdoor|outside|exter/i.test(g.floor || "");
+    const lvl = (g) => (!g.floor ? 9999 : out(g) ? 5000 + (g.flevel ?? 0) : g.flevel === null || g.flevel === undefined ? 900 : g.flevel);
     return [...rooms].sort((a, b) => lvl(a) - lvl(b) || (a.floor || "").localeCompare(b.floor || "", "cs") || a.name.localeCompare(b.name, "cs"));
   }
   _roomItems(rooms, sel, cnt, attr) {
     let last;
     return this._sortRooms(rooms)
       .map((r) => {
-        const head = r.floor !== last ? `<div class="floor">${esc(r.floor || "Ostatní")}</div>` : "";
+        const fi = r.ficon || (/venk|outdoor/i.test(r.floor || "") ? "mdi:tree" : r.floor ? `mdi:home-floor-${Math.max(0, Math.min(3, r.flevel ?? 0))}` : "mdi:help-circle-outline");
+        const head = r.floor !== last ? `<div class="floor">${icon(fi)}${esc(r.floor || "Bez podlaží")}</div>` : "";
         last = r.floor;
         return `${head}<div class="item ${r.id === sel ? "sel" : ""}" ${attr}="${r.id}"><div class="text"><span class="name">${esc(r.name)}</span></div><span class="count">${cnt[r.id]}</span></div>`;
       })
@@ -1344,7 +1350,7 @@ class TecomatPlcPanel extends HTMLElement {
     let last;
     let html = "";
     for (const g of this._sortRooms(rooms)) {
-      if (g.floor !== last) html += `${last !== undefined ? "</optgroup>" : ""}<optgroup label="${esc(g.floor || "Ostatní")}">`;
+      if (g.floor !== last) html += `${last !== undefined ? "</optgroup>" : ""}<optgroup label="${esc(g.floor || "Bez podlaží")}">`;
       last = g.floor;
       html += `<option value="${g.id}" ${g.id === sel ? "selected" : ""}>${esc(g.name)}</option>`;
     }

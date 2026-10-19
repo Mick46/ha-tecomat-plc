@@ -39,6 +39,7 @@ H_OBJ_NAME_OFS = 16
 H_AREA_OFS = 17
 H_AUTOS = 20          # protokol 2: počet automatik
 H_AUTO_NAME_OFS = 21  # protokol 2: index prvního názvu automatiky v řetězcích
+H_FLOOR_OFS = 22      # protokol 2: index podlaží skupiny v řetězcích (0 = není)
 
 # Stavový blok (offset od status base)
 S_HB_IN = 0        # HA -> PLC heartbeat

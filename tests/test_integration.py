@@ -513,11 +513,15 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
 
         # úklid: entita z dřívějšího programu (např. kotel jako switch) je neplatná, ostatní ne
         old = ent.async_get_or_create("switch", DOMAIN, f"{entry.entry_id}_999", config_entry=entry)
+        # stejné unique_id jako binary_sensor kotle, ale jiná platforma (dřívější switch) = také neplatné
+        old2 = ent.async_get_or_create("switch", DOMAIN, f"{entry.entry_id}_227", config_entry=entry)
         await ws.send_json({"id": 14, "type": f"{DOMAIN}/stale", "entry_id": entry.entry_id})
         stale = (await ws.receive_json())["result"]
-        assert [e["entity_id"] for e in stale["entities"]] == [old.entity_id] and stale["devices"] == []
+        assert sorted(e["entity_id"] for e in stale["entities"]) == sorted([old.entity_id, old2.entity_id])
+        assert stale["devices"] == []
         await ws.send_json({"id": 15, "type": f"{DOMAIN}/stale/remove", "entry_id": entry.entry_id})
-        assert (await ws.receive_json())["result"] == {"entities": 1, "devices": 0}
+        assert (await ws.receive_json())["result"] == {"entities": 2, "devices": 0}
+        assert ent.async_get(kotel) is not None
         assert ent.async_get(old.entity_id) is None
         assert ent.async_get(mode) is not None
 
