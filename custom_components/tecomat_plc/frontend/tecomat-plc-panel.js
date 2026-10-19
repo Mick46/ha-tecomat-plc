@@ -513,9 +513,28 @@ class TecomatPlcPanel extends HTMLElement {
     }
     await this._writeActions(b, acts);
   }
-  async _stepCorr(t, d) {
-    const cur = (Number((this._cfg && this._cfg.corr[String(t.idx)]) || 0) + d) / 10;
-    await this._saveCorr(t.idx, Math.max(-10, Math.min(10, cur)).toFixed(1));
+  // korekce: kliknutí na −/+ mění jen koncept, do PLC se zapíše 3 s po posledním kliknutí (všechny najednou)
+  _corrRaw(idx) {
+    const d = this._corrDraft && this._corrDraft[idx];
+    return d !== undefined ? d : Number((this._cfg && this._cfg.corr[String(idx)]) || 0);
+  }
+  _stepCorr(t, d) {
+    this._corrDraft = this._corrDraft || {};
+    this._corrDraft[t.idx] = Math.max(-100, Math.min(100, this._corrRaw(t.idx) + d));
+    clearTimeout(this._corrTimer);
+    this._corrTimer = setTimeout(() => this._flushCorr(), 3000);
+    this._render();
+  }
+  async _flushCorr() {
+    const draft = this._corrDraft || {};
+    this._corrDraft = null;
+    const pairs = Object.entries(draft).map(([idx, v]) => [CORR_BASE + Number(idx), v]);
+    if (!pairs.length) return;
+    await this._run("Zapisuji korekce…", async () => {
+      await this._ws("config/set", { pairs });
+      this._cfg = await this._ws("config/get");
+      this._msg = pairs.length > 1 ? `Korekce zapsány do PLC (${pairs.length})` : "Korekce zapsána do PLC";
+    });
   }
   _exportVersion(ver) {
     const map = ver ? ver.map : this._cfg.map;
@@ -554,7 +573,7 @@ class TecomatPlcPanel extends HTMLElement {
   }
   _tempBox(t, ready) {
     const tv = (this._cfg && this._cfg.temps[String(t.idx)]) || {};
-    const corr = this._cfg ? (this._cfg.corr[String(t.idx)] || 0) / 10 : 0;
+    const corr = this._corrRaw(t.idx) / 10;
     const f = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
     const dis = ready ? "" : "disabled";
     return `<div class="tbox">
@@ -685,10 +704,12 @@ class TecomatPlcPanel extends HTMLElement {
     const trows = temps
       .map((t) => {
         const tv = (this._cfg && this._cfg.temps[String(t.idx)]) || {};
-        const c = this._cfg ? (this._cfg.corr[String(t.idx)] || 0) / 10 : 0;
+        const c = this._corrRaw(t.idx) / 10;
+        const pend = this._corrDraft && this._corrDraft[t.idx] !== undefined;
+        const res = pend && tv.raw !== null && tv.raw !== undefined ? tv.raw + this._corrDraft[t.idx] : tv.cor;
         return `<tr><td class="left">${esc(t.name)}<span class="secondary">naměřeno ${f(tv.raw)}</span></td>
-          <td><span class="corr"><button class="mini" data-corr="${t.idx}" data-d="-1" ${dis}>−</button><span>${c > 0 ? "+" : ""}${c.toFixed(1)}</span><button class="mini" data-corr="${t.idx}" data-d="1" ${dis}>+</button></span></td>
-          <td class="bigtd">${f(tv.cor)}</td></tr>`;
+          <td><span class="corr"><button class="mini" data-corr="${t.idx}" data-d="-1" ${dis}>−</button><span style="${pend ? "color:var(--primary-color)" : ""}" title="${pend ? "zapíše se za 3 s" : ""}">${c > 0 ? "+" : ""}${c.toFixed(1)}</span><button class="mini" data-corr="${t.idx}" data-d="1" ${dis}>+</button></span></td>
+          <td class="bigtd" style="${pend ? "opacity:.6" : ""}">${f(res)}</td></tr>`;
       })
       .join("");
     const mrows = meters
@@ -908,7 +929,8 @@ class TecomatPlcPanel extends HTMLElement {
         ${row("Ruční test", field(tp("fve", 5), "zapnuto") + field(tp("fve", 6), "L1") + field(tp("fve", 7), "L2") + field(tp("fve", 8), "L3"))}
         <div class="note">PI regulátor na každé fázi drží malý přetok do sítě (fakturace je po fázích). Výkon z elektroměru EM03 se průměruje přes celé periody PWM
           (průměrování = počet sekund, PWM má periodu 1 s). Když se měření 30 s nemění (výpadek CIB) nebo vypadne čidlo dole, SSR se vypnou.
-          Ruční test nastaví pevný výkon SSR pro porovnání měření se Shelly (max. teplota platí i v testu).</div></div>`);
+          Ruční test nastaví pevný výkon SSR pro porovnání měření se Shelly (max. teplota platí i v testu).
+          Ki = jak rychle se výkon SSR posouvá k cíli (vyšší = rychlejší, ale může kmitat; když kmitá, snižte), Kp = okamžitá reakce na změnu přetoku.</div></div>`);
     }
     if (tp("export", 0)) {
       const age = vv("inv_age");
