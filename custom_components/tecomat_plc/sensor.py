@@ -53,7 +53,8 @@ class TecomatTemp(TecomatEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         v = self.coordinator.get_signed(self.obj.addr + self._offset)
-        return None if v is None else v / 10
+        # -999 = neplatná teplota (čidlo vadné nebo PLC po startu ještě nemá data) -> neznámá
+        return None if v is None or v <= -999 else v / 10
 
 
 # kódy jednotek (p2) a tříd (p3) objektu VALUE – stejné čísluje generátor programu PLC

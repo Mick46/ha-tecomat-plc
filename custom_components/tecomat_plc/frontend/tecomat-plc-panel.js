@@ -577,7 +577,7 @@ class TecomatPlcPanel extends HTMLElement {
   _tempBox(t, ready) {
     const tv = (this._cfg && this._cfg.temps[String(t.idx)]) || {};
     const corr = this._corrRaw(t.idx) / 10;
-    const f = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
+    const f = (v) => (v === null || v === undefined || v <= -999 ? "–" : `${(v / 10).toFixed(1)} °C`);
     const dis = ready ? "" : "disabled";
     return `<div class="tbox">
       <span class="big">${f(tv.cor)}</span>
@@ -705,7 +705,7 @@ class TecomatPlcPanel extends HTMLElement {
       .map((p) => `<tr><td class="left" colspan="2">${field(p, null)}</td></tr>`)
       .join("");
     const temps = info.temps.filter((t) => t.group === this._setRoom);
-    const f = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
+    const f = (v) => (v === null || v === undefined || v <= -999 ? "–" : `${(v / 10).toFixed(1)} °C`);
     const trows = temps
       .map((t) => {
         const tv = (this._cfg && this._cfg.temps[String(t.idx)]) || {};
@@ -1525,7 +1525,7 @@ class TecomatPlcPanel extends HTMLElement {
     }
     const info = this._info;
     const ready = !!(info && this._cfg && !this._busy);
-    const fmtT = (v) => (v === null || v === undefined ? "–" : `${(v / 10).toFixed(1)} °C`);
+    const fmtT = (v) => (v === null || v === undefined || v <= -999 ? "–" : `${(v / 10).toFixed(1)} °C`);
 
     const entrySel =
       this._entries.length > 1
