@@ -660,7 +660,9 @@ class TecomatPlcPanel extends HTMLElement {
 
   _tabSet(ready) {
     const info = this._info;
-    const circ = new Set(((info.tech || {}).circuits || []).map((c) => c.uid));
+    // okruhy topení a výstupy řízené PLC (doběh čerpadla) mají nastavení v záložce Technologie
+    const tout = (info.tech || {}).outputs || {};
+    const circ = new Set([...((info.tech || {}).circuits || []), ...Object.values(tout).flat()].map((c) => c.uid));
     const params = (info.params || []).filter((p) => !p.tech && !circ.has(p.target));  // ty jsou v záložce Technologie
     const objByUid = {};
     for (const t of info.targets) if (t.obj === t.uid) objByUid[t.uid] = t;
@@ -833,9 +835,10 @@ class TecomatPlcPanel extends HTMLElement {
         ${row("Den od / noc od", field(tp("heat", 4)) + " " + field(tp("heat", 5)))}
         ${row("Hystereze v místnosti", field(tp("heat", 6)))}
         ${row("Kotel min. běh / pauza", field(tp("heat", 7)) + field(tp("heat", 8)))}
+        ${(outs.pump || []).map((o) => row(`${o.name}: doběh čerpadla`, field((info.params || []).find((p) => p.target === o.uid && p.kind === 1)))).join("")}
         <div class="tchips">${chips}</div>
         <div class="note">Kotel běží, když chce topit aspoň jeden okruh. S ním se zapne napájení hlavic, s podlahovkou čerpadlo.
-          Když Home Assistant neodpovídá déle než nastavenou dobu, řídí okruhy PLC podle teplot den / noc.</div></div>`);
+          Čerpadlo po vypnutí okruhu ještě doběhne (rozvede teplo, necyklí). Když Home Assistant neodpovídá déle než nastavenou dobu, řídí okruhy PLC podle teplot den / noc.</div></div>`);
     }
     // teplá voda
     if (tp("tuv", 0)) {
