@@ -950,8 +950,10 @@ class TecomatPlcPanel extends HTMLElement {
         ${row("Plný export od baterie", field(tp("export", 1)))}
         ${row("Omezený export", field(tp("export", 2)))}
         ${row("Pojistka v 15min intervalu", field(tp("export", 3)))}
+        ${row("Pojistka 2 (limit distributora)", field(tp("export", 4)) + field(tp("export", 5), "export"))}
         ${row("Dodáno v tomto intervalu", fmt("exp15", 2, "kWh"))}
-        <div class="note">Baterie pod hranicí → omezený export, jinak 100 %. Když se v 15min intervalu (podle EM03) dodá víc než pojistka, omezený export do konce intervalu.
+        <div class="note">Baterie pod hranicí → omezený export, jinak 100 %. Když se v 15min intervalu (podle EM03) dodá víc než pojistka, omezený export do konce intervalu;
+          nad pojistkou 2 (6,16 kW × 15 min ≈ 1,54 kWh) export podle pojistky 2 (výchozí 0 %) do konce intervalu.
           Do střídače se zapisuje jen při změně. Zapněte až po vypnutí automatizace exportu v Home Assistant, jinak by se přetahovaly.</div></div>`);
     }
     if (V.e_imp || V.e_exp) {
