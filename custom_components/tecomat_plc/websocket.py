@@ -143,6 +143,7 @@ async def ws_info(hass, coord, msg) -> dict[str, Any]:
         "sensors": [
             {"uid": o.uid, "name": o.name, "group": o.group}
             for o in d.objects_of(T_BINARY)
+            if not 7000 <= o.uid < 7100  # stavy technologie (pojistky exportu) nejsou čidla pro automatiky
         ]
         if d.protocol >= 2
         else [],
