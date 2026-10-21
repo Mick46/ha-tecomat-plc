@@ -18,7 +18,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import F_READONLY, S_CFG_CHECKSUM, S_HB_OUT, T_SELECT, T_TEMP, T_VALUE
+from .const import F_READONLY, F_VALUE_DIAG, S_CFG_CHECKSUM, S_HB_OUT, T_SELECT, T_TEMP, T_VALUE
 from .entity import TecomatEntity, TecomatStatusEntity
 
 
@@ -99,6 +99,10 @@ class TecomatValue(TecomatEntity, SensorEntity):
             if self._attr_device_class in TOTALS
             else SensorStateClass.MEASUREMENT
         )
+        if obj.flags & F_VALUE_DIAG:
+            # okamžitá hodnota, která se mění každou sekundu: jen diagnostika, ve výchozím stavu vypnutá
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> float | int | None:

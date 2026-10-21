@@ -42,7 +42,7 @@ OBJECTS2 = [
     (12, 1, 30324, 0, 0, 0, 0, 7012, "Teplá voda dezinfikovat"),   # akce
     (10, 2, 30325, 0, 1, 4, (11 << 8) | 0x10, 65103, "Bazén ohřev"),  # parametr ano/ne jako entita (switch)
     # část 4: výkon fáze L1 z EM03 (role grid1), odběr jako nastavitelné měřidlo (role e_imp, schránka 9002/9003)
-    (6, 2, 30326, 0, 1, 1, 1 | (1 << 8), 311, "Výkon L1"),
+    (6, 2, 30326, 0, 1, 1, 1 | 0x40 | (1 << 8), 311, "Výkon L1"),   # okamžitá hodnota: diagnostika, vypnutá
     (6, 2, 30328, 3, 2, 2, 1 | 2 | 4 | (11 << 8), 314, "Odběr"),
 ]
 AUTO_NAMES = ["PIR vstup"]

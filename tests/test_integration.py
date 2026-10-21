@@ -539,7 +539,8 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         odb = ent.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_314")
         assert float(hass.states.get(odb).state) == 2000.0
         l1 = ent.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_311")
-        assert float(hass.states.get(l1).state) == -250
+        assert ent.async_get(l1).disabled_by is not None   # okamžitá hodnota EM03 je ve výchozím stavu vypnutá
+        assert hass.states.get(l1) is None
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await plc.stop()

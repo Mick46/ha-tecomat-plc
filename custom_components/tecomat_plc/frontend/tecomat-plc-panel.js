@@ -913,7 +913,9 @@ class TecomatPlcPanel extends HTMLElement {
       const rows = [1, 2, 3]
         .map((ph) => {
           const d = vv(`ssr${ph}`);
-          return `<tr><td class="left">L${ph}</td><td>${watts(vv(`grid${ph}`))}</td>
+          // průměr za 10 s ze sald po 1 s (jako elektroměr distributora); okamžitá hodnota EM03 jen bez průměru
+          const g = V[`gavg${ph}`] ? vv(`gavg${ph}`) : vv(`grid${ph}`);
+          return `<tr><td class="left">L${ph}</td><td>${watts(g)}</td><td>${V[`bpw${ph}`] ? fmt(`bpw${ph}`, 0, "W") : ""}</td>
             <td style="text-align:left"><span style="display:inline-block;width:110px;height:8px;border-radius:4px;background:var(--secondary-background-color);vertical-align:middle;margin-right:8px;overflow:hidden">
             <span style="display:block;height:100%;width:${d || 0}%;background:var(--primary-color)"></span></span>${d === null ? "–" : d + " %"}</td></tr>`;
         })
@@ -925,7 +927,8 @@ class TecomatPlcPanel extends HTMLElement {
           ${V.soc ? `<div class="tchip"><span>Baterie</span><b>${fmt("soc", 0, "%")}</b></div>` : ""}
           ${V.pv ? `<div class="tchip"><span>Výkon panelů</span><b>${vv("pv") === null ? "–" : (vv("pv") / 1000).toFixed(2) + " kW"}</b></div>` : ""}
         </div>
-        <div class="scroll"><table><tr><th class="left">Fáze</th><th>Síť (EM03, + odběr)</th><th>SSR výkon</th></tr>${rows}</table></div>
+        <div class="scroll"><table><tr><th class="left">Fáze</th><th>Síť (průměr, + odběr)</th><th>Do bojleru</th><th>SSR výkon</th></tr>${rows}
+          ${V.gavg ? `<tr><td class="left">Celkem</td><td>${watts(vv("gavg"))}</td><td>${fmt("bpw", 0, "W")}</td><td></td></tr>` : ""}</table></div>
         ${row("Ohřev z FVE", field(tp("fve", 0), "zapnuto"))}
         ${row("Cílový přetok na fázi", field(tp("fve", 1)))}
         ${row("Max. teplota dole / hystereze", field(tp("fve", 2)) + field(tp("fve", 3)))}
@@ -933,7 +936,7 @@ class TecomatPlcPanel extends HTMLElement {
         ${row("Regulátor Ki / Kp", field(tp("fve", 9)) + field(tp("fve", 10)))}
         ${row("Výkon tělesa na fázi", field(tp("fve", 11)))}
         ${row("Ruční test", field(tp("fve", 5), "zapnuto") + field(tp("fve", 6), "L1") + field(tp("fve", 7), "L2") + field(tp("fve", 8), "L3"))}
-        <div class="note">PI regulátor na každé fázi drží malý přetok do sítě (fakturace je po fázích). Výkon z elektroměru EM03 se průměruje přes celé periody PWM
+        <div class="note">Síť = průměr za 10 s ze sald po 1 s (jako elektroměr distributora), do bojleru = odhad z výkonu SSR. PI regulátor na každé fázi drží malý přetok do sítě (fakturace je po fázích). Výkon z elektroměru EM03 se průměruje přes celé periody PWM
           (průměrování = počet sekund, PWM má periodu 1 s). Když se měření 30 s nemění (výpadek CIB) nebo vypadne čidlo dole, SSR se vypnou.
           Ruční test nastaví pevný výkon SSR pro porovnání měření se Shelly (max. teplota platí i v testu).
           Ki = jak rychle se výkon SSR posouvá k cíli (vyšší = rychlejší, ale může kmitat; když kmitá, snižte), Kp = okamžitá reakce na změnu přetoku.</div></div>`);
