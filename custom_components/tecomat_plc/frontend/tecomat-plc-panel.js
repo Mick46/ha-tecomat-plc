@@ -947,12 +947,16 @@ class TecomatPlcPanel extends HTMLElement {
       C.exp = (`<div class="card"><div class="card-header">${icon("mdi:transmission-tower-export")}Omezení dodávky do sítě
           <span class="badge ${ok ? "on" : "warn"}">${ok ? "střídač · limit " + fmt("explim", 1, "%") : "střídač neodpovídá"}</span></div>
         ${row("Řízení omezení z PLC", field(tp("export", 0), "zapnuto"))}
-        ${row("Plný export od baterie", field(tp("export", 1)))}
+        ${row("Režim", field(tp("export", 6)))}
+        ${row("Režim Baterie: plný export od", field(tp("export", 1)))}
         ${row("Omezený export", field(tp("export", 2)))}
         ${row("Pojistka v 15min intervalu", field(tp("export", 3)))}
         ${row("Pojistka 2 (limit distributora)", field(tp("export", 4)) + field(tp("export", 5), "export"))}
         ${row("Dodáno v tomto intervalu", fmt("exp15", 2, "kWh"))}
-        <div class="note">Baterie pod hranicí → omezený export, jinak 100 %. Když se v 15min intervalu (podle EM03) dodá víc než pojistka, omezený export do konce intervalu;
+        ${row("Zápis do střídače nejdříve po", field(tp("export", 7)))}
+        ${V.inv_writes ? row("Zápisů do střídače celkem", fmt("inv_writes", 0)) : ""}
+        <div class="note">Režim Bojler: 100 %, dokud bojler bere přebytky; ohřátý bojler nebo vypnutý ohřev z FVE → omezený export (strop ~6 kW, slabší slunce neomezí).
+          Jen pojistky: vždy 100 %. Baterie: pod hranicí SOC omezený export (hystereze 2 %). Když se v 15min intervalu (podle EM03) dodá víc než pojistka, omezený export do konce intervalu;
           nad pojistkou 2 (6,16 kW × 15 min ≈ 1,54 kWh) export podle pojistky 2 (výchozí 0 %) do konce intervalu.
           Do střídače se zapisuje jen při změně. Zapněte až po vypnutí automatizace exportu v Home Assistant, jinak by se přetahovaly.</div></div>`);
     }
