@@ -10,6 +10,7 @@ from homeassistant.const import (
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
+    UnitOfFrequency,
     UnitOfPower,
     UnitOfTemperature,
     UnitOfTime,
@@ -70,6 +71,7 @@ UNITS = {
     9: UnitOfTime.SECONDS,
     10: UnitOfTime.MINUTES,
     12: UnitOfTime.DAYS,
+    14: UnitOfFrequency.HERTZ,
 }
 CLASSES = {
     1: SensorDeviceClass.POWER,
@@ -81,6 +83,7 @@ CLASSES = {
     7: SensorDeviceClass.ILLUMINANCE,
     8: SensorDeviceClass.GAS,
     9: SensorDeviceClass.DURATION,
+    10: SensorDeviceClass.FREQUENCY,
 }
 TOTALS = {SensorDeviceClass.ENERGY, SensorDeviceClass.GAS}
 

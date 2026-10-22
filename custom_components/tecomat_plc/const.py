@@ -84,7 +84,7 @@ TECH_FVE_STATUS = 7030
 VALUE_ROLES = {1: "grid1", 2: "grid2", 3: "grid3", 4: "ssr1", 5: "ssr2", 6: "ssr3", 7: "soc", 8: "pv", 9: "explim",
                10: "exp15", 11: "e_imp", 12: "e_exp", 13: "e_imp_day", 14: "e_exp_day", 15: "grid", 16: "inv_age",
                17: "gavg1", 18: "gavg2", 19: "gavg3", 20: "gavg", 21: "bpw1", 22: "bpw2", 23: "bpw3", 24: "bpw",
-               25: "inv_writes"}
+               25: "inv_writes", 26: "inv_flast"}
 F_VALUE_DIAG = 0x40  # VALUE: diagnostika, ve výchozím stavu vypnutá (rychle se mění)
 TECH_HEAT_STATUS, TECH_TUV_STATUS, TECH_TUV_DAYS, TECH_TUV_ACTION = 7000, 7010, 7011, 7012
 
