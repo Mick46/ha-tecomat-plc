@@ -147,9 +147,9 @@ async def read_descriptor(client) -> Descriptor:
     n_autos = hdr[H_AUTOS] if hdr[H_PROTOCOL] >= 2 else 0
     auto_ofs = hdr[H_AUTO_NAME_OFS] if n_autos else 0
     n_strs = max(obj_ofs + n_obj, auto_ofs + n_autos)
-    for i in range(n_obj):  # volby (SELECT) mají vlastní řetězec
+    for i in range(n_obj):  # volby (SELECT) mají vlastní řetězce (p2 vyšší bajt = počet řetězců, 0 = 1)
         if meta[i * stride] == T_SELECT:
-            n_strs = max(n_strs, meta[i * stride + 3] + 1)
+            n_strs = max(n_strs, meta[i * stride + 3] + max(meta[i * stride + 4] >> 8, 1))
     nbytes = n_strs * sstride + sofs
     sregs = await client.read_many(hdr[H_STRS_BASE], (nbytes + 1) // 2)
     sraw = _regs_to_bytes(sregs, swap)
@@ -180,7 +180,7 @@ async def read_descriptor(client) -> Descriptor:
                 flags=m[6],
                 uid=m[7] or (i + 1),
                 name=s(obj_ofs + i) or f"Objekt {i + 1}",
-                options=s(m[3]).split("|") if m[0] == T_SELECT else [],
+                options="|".join(s(m[3] + k) for k in range(max(m[4] >> 8, 1))).split("|") if m[0] == T_SELECT else [],
             )
         )
     return desc

@@ -44,9 +44,12 @@ OBJECTS2 = [
     # část 4: výkon fáze L1 z EM03 (role grid1), odběr jako nastavitelné měřidlo (role e_imp, schránka 9002/9003)
     (6, 2, 30326, 0, 1, 1, 1 | 0x40 | (1 << 8), 311, "Výkon L1"),   # okamžitá hodnota: diagnostika, vypnutá
     (6, 2, 30328, 3, 2, 2, 1 | 2 | 4 | (11 << 8), 314, "Odběr"),
+    # nastavení střídače s přímým zápisem: volba (seznam ve 2 řetězcích) a číslo; +1 požadovaná, +2 povel
+    (11, 2, 30330, "O2", 3 | (2 << 8), 0, 0x40, 50001, "Pracovní režim"),
+    (10, 2, 30333, 100, 900, 0, 1 | (3 << 8) | 0x40, 50002, "DOD"),
 ]
 AUTO_NAMES = ["PIR vstup"]
-OPTIONS = ["Vypnuto|Zapnuto|Auto", "Vyp|Teplo|Řídí HA|Záloha"]  # simulátor má kratší řetězce než PLC
+OPTIONS = ["Vypnuto|Zapnuto|Auto", "Vyp|Teplo|Řídí HA|Záloha", "Obecný|Ekonomický", "UPS"]  # simulátor má kratší řetězce než PLC
 OPT_OFS = OBJ_OFS + len(OBJECTS2) + len(AUTO_NAMES)
 OBJECTS2 = [tuple(OPT_OFS + int(x[1:]) if isinstance(x, str) and x[:1] == "O" and x[1:].isdigit() else x for x in o)
             for o in OBJECTS2]
@@ -86,6 +89,8 @@ class MockPlcV2(MockPlc):
         self.box[20004] = 0      # ohřev bazénu vypnut
         self.presses = 0
         self.e_imp = 123456
+        self.reg[30330] = 1
+        self.reg[30333] = 800
         self.box.update({4000: 1, 4001: 216, 4006: 20, 4007: 400, 4016: 20})
         for r in range(8, 16):
             self.box[4000 + r] = 0xFFFF
@@ -159,4 +164,10 @@ class MockPlcV2(MockPlc):
         if 9003 in self.box:
             self.e_imp = self.box.pop(9003) * 65536 + self.box.pop(9002, 0)
         r[30328], r[30329] = self.e_imp >> 16, self.e_imp & 0xFFFF
+        # přímý zápis: povel přenese požadovanou hodnotu do přečtené (jako PLC po zápisu do střídače a zpětném čtení)
+        for a in (30330, 30333):
+            if r.get(a + 2, 0) == 1:
+                r[a] = r.get(a + 1, 0)
+                r[a + 2] = 0
+                self.direct_writes = getattr(self, "direct_writes", 0) + 1
         r[STATUS + 4] = 1 if r.get(STATUS + 0, 0) else 0

@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CORR_INDEX_BASE, F_PARAM_ENTITY, PARAM_INDEX_BASE, T_NUMBER, T_TEMP, UNIT_BOOL
+from .const import CORR_INDEX_BASE, F_DIRECT, F_PARAM_ENTITY, PARAM_INDEX_BASE, T_NUMBER, T_TEMP, UNIT_BOOL
 from .entity import TecomatEntity
 from .modbus_client import ModbusError
 from .sensor import UNITS
@@ -23,8 +23,9 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
     entities += [
         TecomatParam(coord, o)
         for o in coord.desc.objects_of(T_NUMBER)
-        if o.flags & F_PARAM_ENTITY and (o.flags >> 8) != UNIT_BOOL  # ano/ne je switch
+        if o.flags & F_PARAM_ENTITY and not o.flags & F_DIRECT and (o.flags >> 8) != UNIT_BOOL  # ano/ne je switch
     ]
+    entities += [TecomatDirectNumber(coord, o) for o in coord.desc.objects_of(T_NUMBER) if o.flags & F_DIRECT]
     async_add_entities(entities)
 
 
@@ -84,3 +85,19 @@ class TecomatParam(TecomatEntity, NumberEntity):
             await self.coordinator.write_config([(PARAM_INDEX_BASE + self.obj.p3, round(value * self._div))])
         except ModbusError as err:
             raise HomeAssistantError(f"Zápis parametru selhal: {err}") from err
+
+
+class TecomatDirectNumber(TecomatParam):
+    """Nastavení zařízení za PLC (střídač): +0 přečtená hodnota, +1 požadovaná, +2 povel; PLC zapíše jednorázově."""
+
+    _attr_mode = NumberMode.BOX
+
+    @property
+    def native_value(self) -> float | None:
+        v = self.coordinator.get(self.obj.addr)
+        if v is None:
+            return None
+        return v / self._div if self._dec else v
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.write_registers(self.obj.addr + 1, [round(value * self._div), 1])

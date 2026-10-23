@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import F_PARAM_ENTITY, F_READONLY, PARAM_INDEX_BASE, T_SELECT
+from .const import F_DIRECT, F_PARAM_ENTITY, F_READONLY, PARAM_INDEX_BASE, T_SELECT
 from .entity import TecomatEntity
 from .modbus_client import ModbusError
 
@@ -19,7 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
     async_add_entities(
         TecomatSelect(coord, o)
         for o in coord.desc.objects_of(T_SELECT)
-        if o.flags & F_PARAM_ENTITY and not o.flags & F_READONLY
+        if (o.flags & (F_PARAM_ENTITY | F_DIRECT)) and not o.flags & F_READONLY
     )
 
 
@@ -39,7 +39,12 @@ class TecomatSelect(TecomatEntity, SelectEntity):
         return self.obj.options[v]
 
     async def async_select_option(self, option: str) -> None:
+        idx = self.obj.options.index(option)
+        if self.obj.flags & F_DIRECT:
+            # přímý zápis (nastavení střídače): +1 požadovaná volba, +2 povel; PLC zapíše jednorázově a přečte zpět
+            await self.coordinator.write_registers(self.obj.addr + 1, [idx, 1])
+            return
         try:
-            await self.coordinator.write_config([(PARAM_INDEX_BASE + self.obj.p3, self.obj.options.index(option))])
+            await self.coordinator.write_config([(PARAM_INDEX_BASE + self.obj.p3, idx)])
         except ModbusError as err:
             raise HomeAssistantError(f"Zápis volby selhal: {err}") from err

@@ -72,6 +72,7 @@ GAS_INDEX_BASE = 9000
 UNIT_BOOL = 11
 F_PARAM_ENTITY = 0x10  # NUMBER/SELECT: zobrazit jako entitu (jinak jen v panelu)
 F_READONLY = 0x20      # LIGHT/SWITCH: řídí logika PLC (v HA binary_sensor); SELECT: jen stav
+F_DIRECT = 0x40        # SELECT/NUMBER: přímý zápis (+0 přečtená hodnota, +1 požadovaná, +2 povel 1), ne parametr v PLC
 UNIT_TIME = 13         # parametr: minuty od půlnoci (panel hh:mm)
 
 # role technologie (meta p3): výstupy a teploty

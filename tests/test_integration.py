@@ -541,6 +541,22 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         l1 = ent.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_311")
         assert ent.async_get(l1).disabled_by is not None   # okamžitá hodnota EM03 je ve výchozím stavu vypnutá
         assert hass.states.get(l1) is None
+
+        # přímý zápis nastavení (střídač): volba z více řetězců, číslo; nejsou to parametry v PLC
+        mode2 = ent.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_50001")
+        assert hass.states.get(mode2).attributes["options"] == ["Obecný", "Ekonomický", "UPS"]
+        assert hass.states.get(mode2).state == "Ekonomický"
+        await hass.services.async_call("select", "select_option", {"entity_id": mode2, "option": "UPS"}, blocking=True)
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(mode2).state == "UPS"
+        dod = ent.async_get_entity_id("number", DOMAIN, f"{entry.entry_id}_50002")
+        assert float(hass.states.get(dod).state) == 80.0
+        await hass.services.async_call("number", "set_value", {"entity_id": dod, "value": 70}, blocking=True)
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert float(hass.states.get(dod).state) == 70.0 and plc.direct_writes == 2
+        assert 50001 not in {p.uid for p in coord.params_v2()} and 50002 not in {p.uid for p in coord.params_v2()}
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await plc.stop()

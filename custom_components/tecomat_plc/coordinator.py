@@ -43,6 +43,7 @@ from .const import (
     T_NUMBER,
     T_SELECT,
     F_READONLY,
+    F_DIRECT,
     T_SWITCH,
     T_TEMP,
     T_VALUE,
@@ -215,6 +216,14 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
             self.async_update_listeners()
         await self.async_request_refresh()
 
+    async def write_registers(self, addr: int, values: list[int]) -> None:
+        """Více registrů jedním zápisem (přímý zápis: požadovaná hodnota a povel najednou)."""
+        try:
+            await self.client.write_multiple(addr, [int(v) & 0xFFFF for v in values])
+        except ModbusError as err:
+            raise HomeAssistantError(f"Zápis do PLC selhal: {err}") from err
+        await self.async_request_refresh()
+
     # ------------------------------------------------------------- heartbeat
     @callback
     def start_heartbeat(self) -> None:
@@ -283,7 +292,10 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
 
     def params_v2(self):
         """Parametry v PLC (schránka 20000 + p3): čísla a volby (ne stavové volby)."""
-        return [o for o in self.desc.objects_of(T_NUMBER, T_SELECT) if not (o.type == T_SELECT and o.flags & F_READONLY)]
+        return [
+            o for o in self.desc.objects_of(T_NUMBER, T_SELECT)
+            if not (o.type == T_SELECT and o.flags & (F_READONLY | F_DIRECT)) and not (o.type == T_NUMBER and o.flags & F_DIRECT)
+        ]
 
     def config_ranges_v2(self) -> list[tuple[int, int]]:
         """Oblasti konfigurace (začátek, počet) pro čtecí okno a zálohy."""
