@@ -105,6 +105,7 @@ SUBTYPES = {
 
 F_VALUE_32 = 0x01
 F_VALUE_UNSIGNED = 0x02
+F_VALUE_NA = 0x80  # VALUE: vyšší slovo 0x8000 (32 bit 0x8000_0000) = neplatná hodnota (např. střídač ještě nepřečten)
 
 NO_MATRIX = 0xFFFF
 

@@ -21,6 +21,7 @@ from .const import (
     CORR_INDEX_BASE,
     DOMAIN,
     F_VALUE_32,
+    F_VALUE_NA,
     F_VALUE_UNSIGNED,
     H_MAGIC,
     H_PROG_VERSION,
@@ -199,8 +200,12 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
             lo = self.get(addr + 1)
             if lo is None:
                 return None
+            if flags & F_VALUE_NA and hi == 0x8000 and lo == 0:
+                return None
             v = (hi << 16) | lo
             return v if flags & F_VALUE_UNSIGNED or v < 0x80000000 else v - 0x100000000
+        if flags & F_VALUE_NA and hi == 0x8000:
+            return None
         return hi if flags & F_VALUE_UNSIGNED else signed16(hi)
 
     def status(self, offset: int) -> int | None:
