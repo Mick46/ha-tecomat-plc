@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -55,9 +54,7 @@ class TecomatSwitch(TecomatEntity, SwitchEntity):
 
 
 class TecomatParamSwitch(TecomatEntity, SwitchEntity):
-    """Parametr ano/ne uložený v PLC (např. ohřev bazénu povolen)."""
-
-    _attr_entity_category = EntityCategory.CONFIG
+    """Parametr ano/ne uložený v PLC (např. ohřev bazénu povolen, řízení exportu) – mezi ovládacími prvky."""
 
     @property
     def is_on(self) -> bool | None:

@@ -91,6 +91,7 @@ class TecomatDirectNumber(TecomatParam):
     """Nastavení zařízení za PLC (střídač): +0 přečtená hodnota, +1 požadovaná, +2 povel; PLC zapíše jednorázově."""
 
     _attr_mode = NumberMode.BOX
+    _attr_entity_category = None  # mezi ovládacími prvky spolu s volbami
 
     @property
     def native_value(self) -> float | None:
