@@ -19,6 +19,8 @@ from .const import (
     AUTO_REGS,
     BTN_SLOTS,
     CORR_INDEX_BASE,
+    DESC_BASES,
+    DESC_MAGIC,
     DOMAIN,
     F_VALUE_32,
     F_VALUE_NA,
@@ -131,6 +133,8 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         self._hb = 0
         self._unsub_hb = None
         self._last_hdr_check = 0.0
+        self._hdr_base: int | None = None  # adresa hlavičky popisu (verze programu se hlídá při každém čtení)
+        self._reload_scheduled = False
         self.versions = None  # VersionStore, nastaví __init__.py
         self.root_device_id: str | None = None  # id zařízení PLC (skupina 0) v registru
         self.options_snapshot: dict = dict(entry.options)
@@ -161,6 +165,14 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
     async def _async_update_data(self) -> dict[int, int]:
         data: dict[int, int] = {}
         try:
+            # verze programu před daty: po nahrání nového programu nečíst registry podle starého popisu
+            # (jiné adresy a příznaky → nesmyslné hodnoty v historii); místo toho nedostupné do znovunačtení
+            if not await self._same_program():
+                if not self._reload_scheduled:
+                    self._reload_scheduled = True
+                    _LOGGER.info("V PLC je jiný program, integrace se znovu načte")
+                    self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
+                raise UpdateFailed("V PLC je jiný program, čekám na znovunačtení integrace")
             for start, cnt in self._ranges:
                 vals = await self.client.read_holding(start, cnt)
                 data.update({start + i: v for i, v in enumerate(vals)})
@@ -170,6 +182,19 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         except ModbusError as err:
             raise UpdateFailed(str(err)) from err
         return data
+
+    async def _same_program(self) -> bool:
+        """Hlavička popisu má platný magic a stejnou verzi programu jako načtený popis."""
+        if self._hdr_base is None:
+            for base in DESC_BASES:
+                hdr = await self.client.read_holding(base, H_PROG_VERSION + 1)
+                if hdr[H_MAGIC] == DESC_MAGIC:
+                    self._hdr_base = base
+                    break
+            else:
+                return False
+        hdr = await self.client.read_holding(self._hdr_base, H_PROG_VERSION + 1)
+        return hdr[H_MAGIC] == DESC_MAGIC and hdr[H_PROG_VERSION] == self.desc.prog_version
 
     async def _check_program_change(self) -> None:
         try:
