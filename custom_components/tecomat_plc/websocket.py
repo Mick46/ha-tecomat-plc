@@ -277,7 +277,12 @@ def _tech(coord) -> dict[str, Any]:
         for o in d.objects_of(T_SELECT)
         if o.flags & F_READONLY
     }
-    extra = {o.uid: {"uid": o.uid, "name": o.name, "addr": o.addr} for o in d.objects_of(T_VALUE, T_ACTION) if 7000 <= o.uid < 7100}
+    extra = {
+        o.uid: {"uid": o.uid, "name": o.name, "addr": o.addr, "dec": o.p1 if o.type == T_VALUE else 0,
+                "unit": UNIT_LABELS.get(o.p2, "") if o.type == T_VALUE else ""}
+        for o in d.objects_of(T_VALUE, T_ACTION, T_BINARY)
+        if 7000 <= o.uid < 7100
+    }
     values = {
         VALUE_ROLES[o.flags >> 8]: {"uid": o.uid, "name": o.name, "addr": o.addr, "dec": o.p1, "unit": UNIT_LABELS.get(o.p2, "")}
         for o in d.objects_of(T_VALUE)

@@ -780,6 +780,30 @@ class TecomatPlcPanel extends HTMLElement {
     });
   }
 
+  _otHtml(tech, lv, tp, field, row) {
+    // kotel přes OpenTherm (UC-1204): ekviterm a data kotle (UID 7060.. z generátoru)
+    if (!tp("heat", 9)) return "";
+    const ex = tech.extra || {};
+    const num = (uid) => {
+      const o = ex[uid];
+      const v = o ? lv(o.addr) : null;
+      return v === null || v === undefined ? "–" : `${(v / 10 ** (o.dec || 0)).toFixed(o.dec || 0)}${o.unit ? " " + (o.unit === "C" ? "°C" : o.unit) : ""}`;
+    };
+    const bit = (uid, on, off) => {
+      const o = ex[uid];
+      const v = o ? lv(o.addr) : null;
+      return o ? `<div class="tchip"><span>${esc(o.name)}</span><b><span class="dot ${v ? "on" : ""}"></span>${v === null || v === undefined ? "–" : v ? on : off}</b></div>` : "";
+    };
+    const chip = (uid) => (ex[uid] ? `<div class="tchip"><span>${esc(ex[uid].name)}</span><b>${num(uid)}</b></div>` : "");
+    return `<div class="trow"><span><b>Kotel (OpenTherm)</b></span><span></span></div>
+      ${row("Teplota vody při +10 °C / −15 °C venku", field(tp("heat", 9)) + field(tp("heat", 10)))}
+      ${row("Teplota vody min. / max.", field(tp("heat", 11)) + field(tp("heat", 12)))}
+      ${row("Ručně (0 = ekviterm)", field(tp("heat", 13)))}
+      <div class="tchips">${chip(7060)}${chip(7061)}${chip(7062)}${chip(7063)}</div>
+      <div class="tchips">${bit(7070, "připojeno", "odpojeno")}${bit(7071, "hoří", "nehoří")}${bit(7072, "topí", "ne")}${bit(7073, "ohřívá", "ne")}${bit(7074, "porucha", "OK")}${ex[7074] && lv(ex[7074].addr) ? chip(7064) : ""}</div>
+      <div class="note">PLC posílá kotli povolení topení (podle okruhů jako dřív relé) a teplotu vody z ekvitermu: přímka mezi +10 °C a −15 °C venku, omezená min. a max. (min. 45 °C kvůli podlahovce). Ruční hodnota nad 0 ekviterm přebije.</div>`;
+  }
+
   _tabTech(ready) {
     const info = this._info;
     const tech = info.tech || {};
@@ -837,6 +861,7 @@ class TecomatPlcPanel extends HTMLElement {
         ${row("Kotel min. běh / pauza", field(tp("heat", 7)) + field(tp("heat", 8)))}
         ${(outs.pump || []).map((o) => row(`${o.name}: doběh čerpadla`, field((info.params || []).find((p) => p.target === o.uid && p.kind === 1)))).join("")}
         <div class="tchips">${chips}</div>
+        ${this._otHtml(tech, lv, tp, field, row)}
         <div class="note">Kotel běží, když chce topit aspoň jeden okruh. S ním se zapne napájení hlavic, s podlahovkou čerpadlo.
           Čerpadlo po vypnutí okruhu ještě doběhne (rozvede teplo, necyklí). Když Home Assistant neodpovídá déle než nastavenou dobu, řídí okruhy PLC podle teplot den / noc.</div></div>`);
     }
