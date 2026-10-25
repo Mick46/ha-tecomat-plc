@@ -29,3 +29,17 @@ async def test_read_descriptor(swap: bool) -> None:
     assert d.objects[11].name == "Porucha akumulátoru"
     assert d.objects[6].type == 4 and d.objects[6].addr == 30050
     assert d.status_base == 30000 and d.mailbox_base == 30100 and d.window_base == 30200
+
+
+@pytest.mark.parametrize("swap", [True, False])
+def test_decode_text(swap: bool) -> None:
+    """Text objektu TEXT: STRING[39] v CP1250, 20 registrů, za koncem nuly."""
+    from custom_components.tecomat_plc.descriptor import _regs_to_bytes, decode_text
+
+    raw = "Porucha zapálení".encode("cp1250").ljust(40, b"\x00")
+    fmt = "<" if swap else ">"
+    import struct
+
+    regs = list(struct.unpack(f"{fmt}20H", raw))
+    assert _regs_to_bytes(regs, swap) == raw
+    assert decode_text(regs, swap, 0) == "Porucha zapálení"

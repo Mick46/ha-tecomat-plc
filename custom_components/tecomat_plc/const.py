@@ -64,6 +64,8 @@ T_GATE = 9    # vrata: +0 povel (1 otevřít, 2 zavřít, 3 impulz), +1 stav (1 
 T_NUMBER = 10 # parametr v PLC: +0 hodnota; p1 min, p2 max, p3 index (schránka 20000+p3); flags bity 0–2 desetinná místa, 8–15 jednotka
 T_SELECT = 11 # volba: +0 index volby; p1 řetězec „A|B|C“, p2 počet, p3 index parametru; flags 0x20 = jen stav (ne parametr)
 T_ACTION = 12 # akce: +0 povel (zápis 1, PLC vynuluje)
+T_TEXT = 13   # text: +0..19 STRING[39] v CP1250 (např. popis poruchy kotle)
+TEXT_REGS = 20
 
 F_VALUE_SET = 0x04     # VALUE: čítač nastavitelný z panelu (schránka 9000 + 2·i nižší, +1 vyšší slovo)
 AUTO_INDEX_BASE = 4000

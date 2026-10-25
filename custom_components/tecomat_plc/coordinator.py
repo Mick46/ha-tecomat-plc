@@ -43,6 +43,8 @@ from .const import (
     T_DIMMER,
     T_LIGHT,
     T_ACTION,
+    T_TEXT,
+    TEXT_REGS,
     T_NUMBER,
     T_SELECT,
     F_READONLY,
@@ -53,7 +55,7 @@ from .const import (
     WINDOW_BYTES,
     WINDOW_REGS,
 )
-from .descriptor import Descriptor, read_header
+from .descriptor import Descriptor, decode_text, read_header
 from .modbus_client import ModbusError
 from .transport import PlcTransport
 
@@ -155,6 +157,8 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
                 addrs.update((o.addr, o.addr + 1))
             elif o.type in (T_NUMBER, T_SELECT, T_ACTION):
                 addrs.add(o.addr)
+            elif o.type == T_TEXT:
+                addrs.update(range(o.addr, o.addr + TEXT_REGS))
             elif o.type == T_VALUE:
                 addrs.add(o.addr)
                 if o.flags & F_VALUE_32:
@@ -232,6 +236,12 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         if flags & F_VALUE_NA and hi == 0x8000:
             return None
         return hi if flags & F_VALUE_UNSIGNED else signed16(hi)
+
+    def get_text(self, addr: int) -> str | None:
+        regs = [self.get(addr + i) for i in range(TEXT_REGS)]
+        if any(r is None for r in regs):
+            return None
+        return decode_text(regs, self.desc.str_swap, self.desc.str_ofs)
 
     def status(self, offset: int) -> int | None:
         return self.get(self.desc.status_base + offset)

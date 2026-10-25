@@ -11,6 +11,7 @@ from homeassistant.const import (
     UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfFrequency,
+    UnitOfPressure,
     UnitOfPower,
     UnitOfTemperature,
     UnitOfTime,
@@ -19,7 +20,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import F_READONLY, F_VALUE_DIAG, S_CFG_CHECKSUM, S_HB_OUT, T_SELECT, T_TEMP, T_VALUE
+from .const import F_READONLY, F_VALUE_DIAG, S_CFG_CHECKSUM, S_HB_OUT, T_SELECT, T_TEMP, T_TEXT, T_VALUE
 from .entity import TecomatEntity, TecomatStatusEntity
 
 
@@ -31,6 +32,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
         entities.append(TecomatTemp(coord, o, offset=0, suffix="_raw"))
     entities.extend(TecomatValue(coord, o) for o in coord.desc.objects_of(T_VALUE))
     entities.extend(TecomatState(coord, o) for o in coord.desc.objects_of(T_SELECT) if o.flags & F_READONLY)
+    entities.extend(TecomatText(coord, o) for o in coord.desc.objects_of(T_TEXT))
     entities.append(TecomatStatusSensor(coord, "heartbeat", "Heartbeat PLC", S_HB_OUT))
     entities.append(TecomatStatusSensor(coord, "checksum", "Kontrolní součet konfigurace", S_CFG_CHECKSUM))
     async_add_entities(entities)
@@ -72,6 +74,7 @@ UNITS = {
     10: UnitOfTime.MINUTES,
     12: UnitOfTime.DAYS,
     14: UnitOfFrequency.HERTZ,
+    15: UnitOfPressure.BAR,
 }
 CLASSES = {
     1: SensorDeviceClass.POWER,
@@ -84,6 +87,7 @@ CLASSES = {
     8: SensorDeviceClass.GAS,
     9: SensorDeviceClass.DURATION,
     10: SensorDeviceClass.FREQUENCY,
+    11: SensorDeviceClass.PRESSURE,
 }
 TOTALS = {SensorDeviceClass.ENERGY, SensorDeviceClass.GAS}
 
@@ -130,6 +134,14 @@ class TecomatState(TecomatEntity, SensorEntity):
         if v is None or v >= len(self.obj.options):
             return None
         return self.obj.options[v]
+
+
+class TecomatText(TecomatEntity, SensorEntity):
+    """Text z PLC (např. popis poruchy kotle z knihovny OpenThermLib)."""
+
+    @property
+    def native_value(self) -> str | None:
+        return self.coordinator.get_text(self.obj.addr) or None
 
 
 class TecomatStatusSensor(TecomatStatusEntity, SensorEntity):

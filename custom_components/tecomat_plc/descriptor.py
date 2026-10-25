@@ -72,6 +72,8 @@ class Descriptor:
     groups: list[PlcGroup] = field(default_factory=list)
     autos: list[str] = field(default_factory=list)  # protokol 2: názvy automatik
     objects: list[PlcObject] = field(default_factory=list)
+    str_swap: bool = False  # pořadí bajtů v řetězcích (z testovacích 'TECO')
+    str_ofs: int = 0  # offset textu v položce STRING
 
     @property
     def plc_model(self) -> str:
@@ -104,6 +106,11 @@ def _detect_strings(regs: list[int]) -> tuple[bool, int, int]:
             continue
         return swap, second - first, first
     raise InvalidDescriptor("Testovací řetězec 'TECO' nenalezen")
+
+
+def decode_text(regs: list[int], swap: bool, ofs: int) -> str:
+    """Text objektu TEXT (STRING v registrech) ve stejném tvaru jako řetězce popisu."""
+    return _decode(_regs_to_bytes(regs, swap)[ofs:])
 
 
 def _decode(raw: bytes) -> str:
@@ -142,6 +149,7 @@ async def read_descriptor(client) -> Descriptor:
     # řetězce
     tst = await client.read_holding(hdr[H_TST_BASE], 40)
     swap, sstride, sofs = _detect_strings(tst)
+    desc.str_swap, desc.str_ofs = swap, sofs
     obj_ofs = hdr[H_OBJ_NAME_OFS] or 64
     area_ofs = hdr[H_AREA_OFS] or 32
     n_autos = hdr[H_AUTOS] if hdr[H_PROTOCOL] >= 2 else 0

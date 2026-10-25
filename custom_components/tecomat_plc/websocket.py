@@ -21,6 +21,7 @@ from .const import (
     ROLE_OUT,
     ROLE_TEMP,
     T_ACTION,
+    T_TEXT,
     T_LIGHT,
     T_SELECT,
     TECH_PARAM_BASES,
@@ -280,7 +281,7 @@ def _tech(coord) -> dict[str, Any]:
     extra = {
         o.uid: {"uid": o.uid, "name": o.name, "addr": o.addr, "dec": o.p1 if o.type == T_VALUE else 0,
                 "unit": UNIT_LABELS.get(o.p2, "") if o.type == T_VALUE else ""}
-        for o in d.objects_of(T_VALUE, T_ACTION, T_BINARY)
+        for o in d.objects_of(T_VALUE, T_ACTION, T_BINARY, T_TEXT)
         if 7000 <= o.uid < 7100
     }
     values = {
@@ -322,6 +323,8 @@ def _live(coord) -> dict[str, Any]:
             out[str(o.addr)] = coord.get_signed(o.addr + 1)
         elif o.type == T_VALUE:
             out[str(o.addr)] = coord.get_value(o.addr, o.flags)
+        elif o.type == T_TEXT:
+            out[str(o.addr)] = coord.get_text(o.addr)
         else:
             out[str(o.addr)] = coord.get(o.addr)
     return out
