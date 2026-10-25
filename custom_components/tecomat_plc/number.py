@@ -96,7 +96,7 @@ class TecomatDirectNumber(TecomatParam):
     @property
     def native_value(self) -> float | None:
         v = self.coordinator.get(self.obj.addr)
-        if v is None:
+        if v is None or v == 0x8000:  # 0x8000 = zařízení ještě nepřečteno (např. po nahrání programu)
             return None
         return v / self._div if self._dec else v
 
