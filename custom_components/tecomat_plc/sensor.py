@@ -75,6 +75,7 @@ UNITS = {
     12: UnitOfTime.DAYS,
     14: UnitOfFrequency.HERTZ,
     15: UnitOfPressure.BAR,
+    16: UnitOfTime.MILLISECONDS,
 }
 CLASSES = {
     1: SensorDeviceClass.POWER,
