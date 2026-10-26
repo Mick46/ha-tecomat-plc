@@ -501,12 +501,34 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         cfg = (await ws.receive_json())["result"]
         assert cfg["map"]["20003"] == 1 and cfg["checksum_plc"] == cfg["checksum_calc"]
 
+        # karta Střídač: nastavení s přímým zápisem z panelu (+1 hodnota, +2 povel), kontrola rozsahu
+        inv = info["tech"]["inverter"]
+        assert [(x["uid"], x["options"], x["dec"]) for x in inv["settings"]] == [
+            (50001, ["Obecný", "Ekonomický", "UPS"], 0), (50002, None, 1)]
+        assert inv["settings"][1]["min"] == 100 and inv["settings"][1]["max"] == 900
+        await ws.send_json({"id": 30, "type": f"{DOMAIN}/direct", "entry_id": entry.entry_id, "addr": 30333, "value": 650})
+        assert (await ws.receive_json())["success"]
+        await coord.async_refresh()
+        assert plc.reg[30333] == 650
+        await ws.send_json({"id": 31, "type": f"{DOMAIN}/direct", "entry_id": entry.entry_id, "addr": 30330, "value": 2})
+        assert (await ws.receive_json())["success"]
+        await coord.async_refresh()
+        assert plc.reg[30330] == 2
+        for i, (addr, v) in enumerate(((30333, 50), (30330, 3), (30321, 1))):
+            await ws.send_json({"id": 32 + i, "type": f"{DOMAIN}/direct", "entry_id": entry.entry_id, "addr": addr, "value": v})
+            assert (await ws.receive_json())["error"]["code"] == "invalid"
+        for i, (addr, v) in enumerate(((30330, 1), (30333, 800))):   # zpět na výchozí (testy níž)
+            await ws.send_json({"id": 35 + i, "type": f"{DOMAIN}/direct", "entry_id": entry.entry_id, "addr": addr, "value": v})
+            assert (await ws.receive_json())["success"]
+        await coord.async_refresh()
+        plc.direct_writes = 0
+
         # podlaží z HA: oblast Kuchyň v podlaží Přízemí
         from homeassistant.helpers import area_registry as ar, floor_registry as fr
         floor = fr.async_get(hass).async_create("Přízemí", level=0)
         area = ar.async_get(hass).async_get_area_by_name("Kuchyň") or ar.async_get(hass).async_create("Kuchyň")
         ar.async_get(hass).async_update(area.id, floor_id=floor.floor_id)
-        await ws.send_json({"id": 13, "type": f"{DOMAIN}/info", "entry_id": entry.entry_id})
+        await ws.send_json({"id": 43, "type": f"{DOMAIN}/info", "entry_id": entry.entry_id})
         groups = {g["name"]: g for g in (await ws.receive_json())["result"]["groups"]}
         assert groups["Kuchyň"]["floor"] == "Přízemí" and groups["Kuchyň"]["flevel"] == 0
         assert groups["Chodba"]["floor"] is None
@@ -515,22 +537,22 @@ async def test_protocol2(hass: HomeAssistant, hass_ws_client) -> None:
         old = ent.async_get_or_create("switch", DOMAIN, f"{entry.entry_id}_999", config_entry=entry)
         # stejné unique_id jako binary_sensor kotle, ale jiná platforma (dřívější switch) = také neplatné
         old2 = ent.async_get_or_create("switch", DOMAIN, f"{entry.entry_id}_227", config_entry=entry)
-        await ws.send_json({"id": 14, "type": f"{DOMAIN}/stale", "entry_id": entry.entry_id})
+        await ws.send_json({"id": 44, "type": f"{DOMAIN}/stale", "entry_id": entry.entry_id})
         stale = (await ws.receive_json())["result"]
         assert sorted(e["entity_id"] for e in stale["entities"]) == sorted([old.entity_id, old2.entity_id])
         assert stale["devices"] == []
-        await ws.send_json({"id": 15, "type": f"{DOMAIN}/stale/remove", "entry_id": entry.entry_id})
+        await ws.send_json({"id": 45, "type": f"{DOMAIN}/stale/remove", "entry_id": entry.entry_id})
         assert (await ws.receive_json())["result"] == {"entities": 2, "devices": 0}
         assert ent.async_get(kotel) is not None
         assert ent.async_get(old.entity_id) is None
         assert ent.async_get(mode) is not None
 
         # část 4: role hodnot pro panel, elektroměr jako druhé nastavitelné měřidlo (kWh)
-        await ws.send_json({"id": 16, "type": f"{DOMAIN}/info", "entry_id": entry.entry_id})
+        await ws.send_json({"id": 46, "type": f"{DOMAIN}/info", "entry_id": entry.entry_id})
         info = (await ws.receive_json())["result"]
         assert info["tech"]["values"]["grid1"]["uid"] == 311 and info["tech"]["values"]["e_imp"]["unit"] == "kWh"
         assert [(m["uid"], m["unit"]) for m in info["meters"]] == [(241, "m³"), (314, "kWh")]
-        await ws.send_json({"id": 17, "type": f"{DOMAIN}/config/set", "entry_id": entry.entry_id,
+        await ws.send_json({"id": 47, "type": f"{DOMAIN}/config/set", "entry_id": entry.entry_id,
                             "pairs": [[9002, 2000000 % 65536], [9003, 2000000 // 65536]]})
         assert (await ws.receive_json())["success"]
         assert plc.e_imp == 2000000

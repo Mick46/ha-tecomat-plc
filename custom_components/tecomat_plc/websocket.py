@@ -16,6 +16,7 @@ from homeassistant.helpers import floor_registry as fr
 
 from .const import (
     DOMAIN,
+    F_DIRECT,
     F_READONLY,
     F_VALUE_SET,
     ROLE_OUT,
@@ -289,7 +290,31 @@ def _tech(coord) -> dict[str, Any]:
         for o in d.objects_of(T_VALUE)
         if (o.flags >> 8) in VALUE_ROLES
     }
-    return {"outputs": outs, "circuits": circuits, "temps": temps, "states": state, "extra": extra, "values": values}
+    return {"outputs": outs, "circuits": circuits, "temps": temps, "states": state, "extra": extra, "values": values,
+            "inverter": _inverter(d)}
+
+
+INV_UID_MIN, INV_UID_MAX = 50000, 59999  # generátor: objekty z listu FVE registry
+
+
+def _inverter(d) -> dict[str, Any]:
+    """Střídač (list FVE registry): nastavení s přímým zápisem, stavy a texty pro kartu v panelu."""
+    inv = [o for o in d.objects if INV_UID_MIN <= o.uid <= INV_UID_MAX]
+    settings = []
+    for o in inv:
+        if o.type not in (T_SELECT, T_NUMBER) or not o.flags & F_DIRECT:
+            continue
+        sel = o.type == T_SELECT
+        settings.append({
+            "uid": o.uid, "name": o.name, "addr": o.addr, "options": o.options if sel else None,
+            "min": 0 if sel else (o.p1 - 65536 if o.p1 > 32767 else o.p1),
+            "max": 0 if sel else (o.p2 - 65536 if o.p2 > 32767 else o.p2),
+            "dec": 0 if sel else o.flags & 7, "unit": "" if sel else UNIT_LABELS.get(o.flags >> 8, ""),
+        })
+    states = [{"uid": o.uid, "name": o.name, "addr": o.addr, "options": o.options}
+              for o in inv if o.type == T_SELECT and o.flags & F_READONLY]
+    texts = [{"uid": o.uid, "name": o.name, "addr": o.addr} for o in inv if o.type == T_TEXT]
+    return {"settings": settings, "states": states, "texts": texts}
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/config/get", vol.Required("entry_id"): str})
@@ -359,6 +384,35 @@ async def ws_press(hass, coord, msg) -> dict[str, Any]:
     if not any(o.addr == msg["addr"] for o in coord.desc.objects_of(T_ACTION)):
         raise ValueError("Neznámá akce")
     await coord.write_register(msg["addr"], 1)
+    return {"ok": True}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/direct",
+        vol.Required("entry_id"): str,
+        vol.Required("addr"): int,
+        vol.Required("value"): int,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+@_with_coordinator
+async def ws_direct(hass, coord, msg) -> dict[str, Any]:
+    """Nastavení zařízení za PLC (střídač, přímý zápis): +1 požadovaná hodnota, +2 povel; PLC zapíše jednorázově."""
+    o = next((x for x in coord.desc.objects_of(T_SELECT, T_NUMBER) if x.addr == msg["addr"] and x.flags & F_DIRECT), None)
+    if o is None:
+        raise ValueError("Neznámé nastavení")
+    v = msg["value"]
+    if o.type == T_SELECT:
+        if not 0 <= v < len(o.options):
+            raise ValueError("Volba mimo rozsah")
+    else:
+        lo = o.p1 - 65536 if o.p1 > 32767 else o.p1
+        hi = o.p2 - 65536 if o.p2 > 32767 else o.p2
+        if not lo <= v <= hi:
+            raise ValueError("Hodnota mimo rozsah")
+    await coord.write_registers(o.addr + 1, [v, 1])
     return {"ok": True}
 
 
@@ -466,6 +520,7 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_config_get,
         ws_live,
         ws_press,
+        ws_direct,
         ws_stale,
         ws_stale_remove,
         ws_config_set,

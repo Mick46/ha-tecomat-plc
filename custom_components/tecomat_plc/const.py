@@ -87,7 +87,10 @@ TECH_FVE_STATUS = 7030
 VALUE_ROLES = {1: "grid1", 2: "grid2", 3: "grid3", 4: "ssr1", 5: "ssr2", 6: "ssr3", 7: "soc", 8: "pv", 9: "explim",
                10: "exp15", 11: "e_imp", 12: "e_exp", 13: "e_imp_day", 14: "e_exp_day", 15: "grid", 16: "inv_age",
                17: "gavg1", 18: "gavg2", 19: "gavg3", 20: "gavg", 21: "bpw1", 22: "bpw2", 23: "bpw3", 24: "bpw",
-               25: "inv_writes", 26: "inv_flast"}
+               25: "inv_writes", 26: "inv_flast",
+               # karta Střídač
+               27: "inv_card", 28: "bat_pw", 29: "house_pw", 30: "backup_pw", 31: "inv_temp", 32: "bat_temp", 33: "soh",
+               34: "pv_day", 35: "house_day", 36: "bat_chg_day", 37: "bat_dis_day", 38: "rtc_off", 39: "end_soc"}
 F_VALUE_DIAG = 0x40  # VALUE: diagnostika, ve výchozím stavu vypnutá (rychle se mění)
 TECH_HEAT_STATUS, TECH_TUV_STATUS, TECH_TUV_DAYS, TECH_TUV_ACTION = 7000, 7010, 7011, 7012
 

@@ -271,6 +271,7 @@ const STYLE_V2 = `
   .tchip { display: flex; flex-direction: column; min-width: 100px; }
   .tchip span { color: var(--secondary-text-color); font-size: 12px; }
   .tchip b { font-size: 20px; font-weight: 400; }
+  .tchip b .secondary { font-size: 13px; color: var(--secondary-text-color); }
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--disabled-text-color, #888); margin-right: 6px; vertical-align: middle; }
   .dot.on { background: var(--state-climate-heat-color, #ff8100); box-shadow: 0 0 6px var(--state-climate-heat-color, #ff8100); }
   .badge { margin-left: auto; font-size: 12px; padding: 3px 10px; border-radius: 12px; background: var(--secondary-background-color);
@@ -773,6 +774,13 @@ class TecomatPlcPanel extends HTMLElement {
     if (this._liveTimer) clearInterval(this._liveTimer);
     this._liveTimer = null;
   }
+  async _direct(addr, value) {
+    // nastavení střídače: PLC hodnotu zapíše jednorázově a přečte zpět
+    await this._run("Zapisuji do střídače…", async () => {
+      await this._ws("direct", { addr, value });
+      this._msg = "Odesláno do PLC, střídač hodnotu převezme při dalším zápisu";
+    });
+  }
   async _press(addr, label) {
     await this._run("Odesílám povel…", async () => {
       await this._ws("press", { addr });
@@ -892,8 +900,15 @@ class TecomatPlcPanel extends HTMLElement {
         ${row("Kdy spustit", field(tp("tuv", 10), "", { dropdown: true }) + " " + field(tp("tuv", 11)))}
         ${row("Od poslední dezinfekce", (days === null || days === undefined ? "–" : `${(days / 10).toFixed(1)} dne`) +
           (act ? ` <button class="btn outlined" data-press="${act.addr}" data-label="Dezinfekce" ${dis}>${icon("mdi:play")}Dezinfikovat teď</button>` : ""))}
-        <div class="note">Plyn ohřívá horní polovinu bojleru podle horního čidla. V létě jen jako záloha, když předpověď FVE (posílá Home Assistant) nestačí.
-          Dezinfekce se spustí v nastavený den a čas, jen když voda dole za poslední interval nedosáhla teploty „splněno“.</div></div>`);
+        <div class="note">Plyn ohřívá horní polovinu bojleru podle horního čidla${tp("fve", 0) ? ", spirála z přebytků FVE celý bojler odspodu" : ""}. Režimy plynu:<br>
+          <b>Auto</b> – když se topí, platí Zima, jinak Léto.<br>
+          <b>Léto</b> – plyn jen jako záloha: zapne, až voda nahoře klesne pod „léto min“ a zároveň předpověď FVE na dnešek nedosahuje „předpověď stačí od“
+          (předpověď posílá Home Assistant; když neběží, předpověď se nepoužije a plyn hlídá jen „léto min“). Vypne na „léto max“.<br>
+          <b>Zima</b> – plyn drží vodu nahoře mezi „zima min“ a „zima max“.<br>
+          <b>Jen FVE</b> – plyn neohřívá nikdy${tp("fve", 0) ? ", teplou vodu dělá jen spirála z přebytků" : ""}.<br>
+          Dezinfekce se spustí v nastavený den a čas, jen když voda dole za poslední interval nedosáhla teploty „splněno“.
+          ${tp("fve", 0) ? "Ohřívá spirála naplno (i ze sítě, např. v noci za levný tarif), dokud voda dole nedosáhne teploty dezinfekce, nejdéle 4 h. Plyn se nepouští (spodek bojleru neohřeje), režim Jen FVE ji neblokuje."
+            : "Ohřívá plyn, dokud voda nahoře nedosáhne teploty dezinfekce, nejdéle 4 h; v režimu Jen FVE se nespustí."}</div></div>`);
     }
     // okruhy
     const circuits = [...(tech.circuits || [])].sort((a, b) => this._groupName(a.group).localeCompare(this._groupName(b.group), "cs"));
@@ -996,11 +1011,66 @@ class TecomatPlcPanel extends HTMLElement {
           <tr><td class="left">Dodávka</td><td>${fmt("e_exp", 1, "kWh")}</td><td>${fmt("e_exp_day", 2, "kWh")}</td></tr></table></div>
         <div class="note">PLC počítá energii z výkonu fází po fázích jako elektroměr distributora. Stav celkem jde nastavit v záložce Nastavení (Měřidla).</div></div>`);
     }
-    // pevné rozložení: Topení | Teplá voda, Okruhy přes celou šířku, Bazén + Bojler | Omezení + Elektroměr
+    // střídač: stav, toky, dnešní energie, baterie, nastavení (přímý zápis přes PLC), diagnostika
+    const inv = tech.inverter || {};
+    if (V.inv_card || (inv.settings || []).length) {
+      const ex = tech.extra || {};
+      const xv = (uid) => (ex[uid] ? lv(ex[uid].addr) : null);
+      const card = vv("inv_card");
+      const age = vv("inv_age");
+      const comm = age === null || age < 30;
+      const stTxt = comm ? ["čeká", "na síti", "ostrov (off-grid)", "porucha", "aktualizace FW"][card] || "–" : "neodpovídá";
+      const stCls = !comm || card === 3 ? "warn" : card === 1 ? "on" : card === 2 ? "warn" : "";
+      const kw = (role) => (vv(role) === null ? "–" : `${(vv(role) / 1000).toFixed(2)} kW`);
+      // výkon baterie ze střídače: záporný = nabíjí, kladný = vybíjí
+      const batTxt = () => {
+        const b = vv("bat_pw");
+        return b === null ? "–" : Math.round(b) === 0 ? "stojí" : `${b < 0 ? "nabíjí" : "vybíjí"} ${Math.abs(Math.round(b))} W`;
+      };
+      const chip = (label, html) => `<div class="tchip"><span>${esc(label)}</span><b>${html}</b></div>`;
+      const sets = (inv.settings || [])
+        .map((x) => {
+          const v = lv(x.addr);
+          if (x.options) {
+            const ok = v !== null && v !== undefined && v < x.options.length;
+            return row(x.name, `<select data-dsel="${x.addr}" ${dis}>${ok ? "" : `<option selected disabled>–</option>`}${x.options
+              .map((o, i) => `<option value="${i}" ${ok && v === i ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`);
+          }
+          const num = v === null || v === undefined || v === 0x8000 ? "" : (v / 10 ** x.dec).toFixed(x.dec);
+          return row(x.name, `<label class="pf"><input class="num" data-dnum="${x.addr}" data-dec="${x.dec}" type="number" step="${1 / 10 ** x.dec}"
+            min="${x.min / 10 ** x.dec}" max="${x.max / 10 ** x.dec}" value="${num}" ${dis}><span class="unit">${esc(x.unit)}</span></label>`);
+        })
+        .join("");
+      const fault = xv(7049);
+      const flast = vv("inv_flast");
+      const off = vv("rtc_off");
+      C.inv = (`<div class="card wide"><div class="card-header">${icon("mdi:solar-power-variant-outline")}Střídač<span class="badge ${stCls}">${esc(stTxt)}</span></div>
+        <div class="tchips">
+          ${V.pv ? chip("Panely", kw("pv")) : ""}
+          ${V.soc ? chip("Baterie", fmt("soc", 0, "%") + (V.bat_pw ? ` <span class="secondary">${batTxt()}</span>` : "")) : ""}
+          ${V.house_pw ? chip("Dům", kw("house_pw")) : ""}
+          ${V.backup_pw ? chip("Záložní výstup", kw("backup_pw")) : ""}
+          ${V.inv_temp ? chip("Teplota střídače", fmt("inv_temp", 1, "°C")) : ""}
+        </div>
+        ${V.pv_day ? `<div class="scroll"><table><tr><th class="left"></th><th>Výroba FVE</th><th>Spotřeba domu</th><th>Nabito do baterie</th><th>Vybito z baterie</th></tr>
+          <tr><td class="left">Dnes</td><td>${fmt("pv_day", 1, "kWh")}</td><td>${fmt("house_day", 1, "kWh")}</td><td>${fmt("bat_chg_day", 1, "kWh")}</td><td>${fmt("bat_dis_day", 1, "kWh")}</td></tr></table></div>` : ""}
+        ${V.soh || V.bat_temp ? row("Baterie", [V.soh ? `zdraví (SOH) ${fmt("soh", 0, "%")}` : "", V.bat_temp ? `teplota ${fmt("bat_temp", 1, "°C")}` : "",
+          V.end_soc ? `vypíná při ${fmt("end_soc", 0, "%")} (on-grid)` : ""].filter(Boolean).join(" · ")) : ""}
+        ${sets}
+        ${(inv.texts || []).map((t) => row(t.name, esc(lv(t.addr) || "–"))).join("")}
+        ${V.rtc_off ? row("Hodiny střídače proti PLC", off === null ? "–" : `${off > 0 ? "+" : ""}${off} s`) : ""}
+        ${ex[7052] ? row("Komunikace", `chyb ${xv(7052) ?? "–"}${ex[7054] && lv(ex[7054].addr) ? ` · ${esc(lv(ex[7054].addr))}` : ""}`) : ""}
+        ${ex[7049] ? row("Porucha", (fault ? `<span style="color:var(--error-color)">aktivní</span>` : "není") +
+          (flast ? ` · poslední kód ${flast}` : "") +
+          (ex[7051] && flast ? ` <button class="btn outlined" data-press="${ex[7051].addr}" data-label="Potvrzení poruchy" ${dis}>${icon("mdi:check")}Potvrdit</button>` : "")) : ""}
+        <div class="note">Nastavení se do střídače zapíše jednorázově přes PLC; nová hodnota se tu ukáže po dalším přečtení (pomalé registry až za 5 min).
+          Kód poruchy se drží do potvrzení. Hodiny: + znamená, že střídač jde napřed (PLC má čas z NTP).</div></div>`);
+    }
+    // pevné rozložení: Topení | Teplá voda, Okruhy přes celou šířku, Bazén + Bojler | Omezení + Elektroměr, Střídač přes celou šířku
     const cols = (l, r) => (l.length || r.length ? `<div class="tcols"><div class="tcol">${l.join("")}</div><div class="tcol">${r.join("")}</div></div>` : "");
     const has = (...k) => k.map((x) => C[x]).filter(Boolean);
     return `${this._alerts(false)}<div class="tech ${this._narrow ? "narrow" : ""}">
-      ${cols(has("heat"), has("tuv"))}${C.zones || ""}${cols(has("pool", "fve"), has("exp", "em"))}</div>`;
+      ${cols(has("heat"), has("tuv"))}${C.zones || ""}${cols(has("pool", "fve"), has("exp", "em"))}${C.inv || ""}</div>`;
   }
 
   async _setMeter(m, input) {
@@ -1292,6 +1362,15 @@ class TecomatPlcPanel extends HTMLElement {
       })
     );
     on("button[data-press]:not([disabled])", (el) => this._press(Number(el.dataset.press), el.dataset.label));
+    root.querySelectorAll("select[data-dsel]").forEach((el) =>
+      el.addEventListener("change", () => this._direct(Number(el.dataset.dsel), Number(el.value)))
+    );
+    root.querySelectorAll("input[data-dnum]").forEach((el) =>
+      el.addEventListener("change", () => {
+        const v = parseFloat(String(el.value).replace(",", "."));
+        if (!isNaN(v)) this._direct(Number(el.dataset.dnum), Math.round(v * 10 ** Number(el.dataset.dec)));
+      })
+    );
     on("button[data-meter]:not([disabled])", (el) => {
       const m = this._info.meters.find((x) => x.i === Number(el.dataset.meter));
       if (m) this._setMeter(m, root.getElementById(`meter-${m.i}`).value);
