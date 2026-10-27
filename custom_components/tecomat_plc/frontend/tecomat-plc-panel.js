@@ -1149,12 +1149,14 @@ class TecomatPlcPanel extends HTMLElement {
         <div class="row"><span>Časová okna</span><div class="col2">${wins}<small class="secondary">prázdné = kdykoli</small></div></div>
         <label class="row"><span>Výstup</span>${outSel}</label>
         ${outT && outT.dimmer ? `<label class="row"><span>Jas</span><span><input class="num" data-ar="17" type="number" min="0" max="100" value="${c[17]}" ${dis}> % <small class="secondary">(0 = maximum)</small></span></label>` : ""}
+        <label class="row"><span>Po ručním zásahu</span><span>zhasnout po <input class="num" data-ar="18" type="number" min="0" max="600" value="${c[18]}" ${dis}> min bez pohybu <small class="secondary">(0 = nezhasínat)</small></span></label>
       </div>
       <div class="card-actions">
         <button class="btn" id="autocancel" ${dirty && ready ? "" : "disabled"}>Zrušit změny</button>
         <button class="btn filled" id="autosave" ${dirty && ready ? "" : "disabled"}>${icon("mdi:content-save")}Zapsat do PLC</button>
       </div>
-      <div class="note">Automatika rozsvítí výstup, když čidlo sepne (nebo rozepne) a je splněný soumrak i časové okno. Zhasne po uplynutí doby od posledního spuštění. Běží v PLC i bez Home Assistant.</div>
+      <div class="note">Automatika rozsvítí zhasnutý výstup, když čidlo sepne (nebo rozepne) a je splněný soumrak i časové okno. Zhasne po uplynutí doby od posledního spuštění.
+        Ruční zásah má přednost: světlo rozsvícené nebo změněné tlačítkem či z Home Assistant automatika nezhasne (jen po nastavené době bez pohybu), „Přepni“ na světle od automatiky ho rozsvítí naplno. Po zhasnutí tlačítkem čidlo světlo nerozsvítí, dokud trvá pohyb. Běží v PLC i bez Home Assistant.</div>
     </div>`;
     return `<div class="content ${this._narrow ? "narrow" : ""}"><div class="col"><div class="card"><div class="card-header">${icon("mdi:robot")}Automatiky</div>${list}<div style="height:8px"></div></div></div><div class="col">${form}</div></div>`;
   }
