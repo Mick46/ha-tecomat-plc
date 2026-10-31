@@ -180,6 +180,9 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
             for start, cnt in self._ranges:
                 vals = await self.client.read_holding(start, cnt)
                 data.update({start + i: v for i, v in enumerate(vals)})
+            # program se mohl změnit během čtení (změna za chodu): data mohou být podle nových adres → zahodit
+            if not await self._same_program():
+                raise UpdateFailed("Program v PLC se změnil během čtení, data zahozena")
             if time.monotonic() - self._last_hdr_check > HEADER_CHECK_S:
                 self._last_hdr_check = time.monotonic()
                 await self._check_program_change()
