@@ -29,7 +29,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
 
 # protokol 2: podtyp výstupu -> třída a ikona
 ICONS = {4: "mdi:pump", 5: "mdi:fan", 7: "mdi:water-boiler", 8: "mdi:water-thermometer", 9: "mdi:power-plug",
-         10: "mdi:radiator"}
+         10: "mdi:radiator", 11: "mdi:led-on"}
 
 
 class TecomatSwitch(TecomatEntity, SwitchEntity):

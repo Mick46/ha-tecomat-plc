@@ -106,6 +106,7 @@ SUBTYPES = {
     8: "TUV",
     9: "Napájení hlavic",
     10: "Topný okruh",
+    11: "LED",
 }
 
 F_VALUE_32 = 0x01

@@ -43,7 +43,7 @@ from .const import (
 from .sensor import UNITS
 
 UNIT_LABELS = {k: str(v) for k, v in UNITS.items()}
-TECH_SUBTYPES = (7, 8, 9, 10)
+TECH_SUBTYPES = (7, 8, 9, 10, 11)   # 11 = LED na vypínači (řídí HA automatizace)
 from .modbus_client import ModbusError
 
 
