@@ -137,6 +137,8 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         self._last_hdr_check = 0.0
         self._hdr_base: int | None = None  # adresa hlavičky popisu (verze programu se hlídá při každém čtení)
         self._reload_scheduled = False
+        # zápisy HA: adresa → (hodnota, čas zápisu); čtení zahájené před zápisem nesmí hodnotu přepsat starou
+        self._writes: dict[int, tuple[int, float]] = {}
         self.versions = None  # VersionStore, nastaví __init__.py
         self.root_device_id: str | None = None  # id zařízení PLC (skupina 0) v registru
         self.options_snapshot: dict = dict(entry.options)
@@ -168,6 +170,7 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
     # ------------------------------------------------------------------ data
     async def _async_update_data(self) -> dict[int, int]:
         data: dict[int, int] = {}
+        t0 = time.monotonic()
         try:
             # verze programu před daty: po nahrání nového programu nečíst registry podle starého popisu
             # (jiné adresy a příznaky → nesmyslné hodnoty v historii); místo toho nedostupné do znovunačtení
@@ -183,12 +186,26 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
             # program se mohl změnit během čtení (změna za chodu): data mohou být podle nových adres → zahodit
             if not await self._same_program():
                 raise UpdateFailed("Program v PLC se změnil během čtení, data zahozena")
+            self._apply_writes(data, t0)
             if time.monotonic() - self._last_hdr_check > HEADER_CHECK_S:
                 self._last_hdr_check = time.monotonic()
                 await self._check_program_change()
         except ModbusError as err:
             raise UpdateFailed(str(err)) from err
         return data
+
+    def _note_write(self, addr: int, value: int) -> None:
+        self._writes[addr] = (value & 0xFFFF, time.monotonic())
+
+    def _apply_writes(self, data: dict[int, int], t0: float) -> None:
+        """Čtení zahájené před zápisem z HA vrátilo u zapsané adresy možná ještě starou hodnotu
+        (relé pak v HA na 1 s „cvakne“ zpět): ponechat zapsanou. Čtení zahájené po zápisu už platí."""
+        for addr, (val, t) in list(self._writes.items()):
+            if t >= t0:
+                if addr in data:
+                    data[addr] = val
+            else:
+                del self._writes[addr]
 
     async def _same_program(self) -> bool:
         """Hlavička popisu má platný magic a stejnou verzi programu jako načtený popis."""
@@ -250,9 +267,11 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
         return self.get(self.desc.status_base + offset)
 
     async def write_register(self, addr: int, value: int) -> None:
+        self._note_write(addr, value)
         try:
             await self.client.write_single(addr, value)
         except ModbusError as err:
+            self._writes.pop(addr, None)
             raise HomeAssistantError(f"Zápis do PLC selhal: {err}") from err
         if self.data is not None:
             self.data[addr] = value & 0xFFFF
@@ -261,9 +280,13 @@ class TecomatCoordinator(DataUpdateCoordinator[dict[int, int]]):
 
     async def write_registers(self, addr: int, values: list[int]) -> None:
         """Více registrů jedním zápisem (přímý zápis: požadovaná hodnota a povel najednou)."""
+        for i, v in enumerate(values):
+            self._note_write(addr + i, int(v))
         try:
             await self.client.write_multiple(addr, [int(v) & 0xFFFF for v in values])
         except ModbusError as err:
+            for i in range(len(values)):
+                self._writes.pop(addr + i, None)
             raise HomeAssistantError(f"Zápis do PLC selhal: {err}") from err
         await self.async_request_refresh()
 
